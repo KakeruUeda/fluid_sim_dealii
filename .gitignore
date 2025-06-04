@@ -1,0 +1,8 @@
+bin
+build
+input
+output
+a.out
+*.vti
+*.vtu
+*.vscode

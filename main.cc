@@ -52,6 +52,12 @@ void print_mesh_info(const Triangulation<dim>& triangulation, const std::string&
   std::cout << " written to " << filename << std::endl << std::endl;
 }
 
+enum class BoundaryID {
+  wall = 4,
+  inlet = 5,
+  outlet = 6 
+};
+
 template <int dim>
 class NavierStokesProblem
 {
@@ -64,6 +70,8 @@ private:
   void make_grid();
   void setup_system();
   void assemble_system();
+  void solve();
+  void output_results() const;
 
   Triangulation<dim> triangulation;
   const FE_SimplexP<dim> fe;
@@ -79,15 +87,100 @@ template <int dim>
 void NavierStokesProblem<dim>::assemble_system()
 {
   const QGauss<dim> quadrature_formula(fe.degree + 1);
-  std::cout << quadrature_formula.size() << std::endl;
-  std::cout << quadrature_formula.point(2) << std::endl;
-
-  // auto test = quadrature_formula.get_points();
-  // std::cout << test.size() << std::endl;
 
   FEValues<dim> fe_values(fe, quadrature_formula, 
                           update_values | update_gradients | update_JxW_values);
+  
+  const unsigned int dofs_per_cell = fe.n_dofs_per_cell();   
+
+  FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
+  Vector<double>     cell_rhs(dofs_per_cell);
+
+  std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+
+  for (const auto &cell : dof_handler.active_cell_iterators())
+  {
+    fe_values.reinit(cell);
+
+    cell_matrix = 0;
+    cell_rhs = 0;
+
+    for (const unsigned int q_index : fe_values.quadrature_point_indices()) 
+    {
+      for (const unsigned int i : fe_values.dof_indices())
+        for (const unsigned int j : fe_values.dof_indices())
+          cell_matrix(i, j) +=
+            (fe_values.shape_grad(i, q_index) *
+             fe_values.shape_grad(j, q_index) *
+             fe_values.JxW(q_index));
+
+      for (const unsigned int i : fe_values.dof_indices())
+        cell_rhs(i) += (fe_values.shape_value(i, q_index)) *
+                        1. * 
+                        fe_values.JxW(q_index);
+    }
+    cell->get_dof_indices(local_dof_indices);
+
+    for (const unsigned int i : fe_values.dof_indices())
+      for (const unsigned int j : fe_values.dof_indices())
+        system_matrix.add(local_dof_indices[i],
+                          local_dof_indices[j],
+                          cell_matrix(i, j));
+
+    for (const unsigned int i : fe_values.dof_indices())
+      system_rhs(local_dof_indices[i]) += cell_rhs(i);
+
+  }
+  std::map<types::global_dof_index, double> boundary_values;
+
+  // VectorTools::interpolate_boundary_values(dof_handler, 
+  //                                          types::boundary_id(BoundaryID::wall), 
+  //                                          Functions::ZeroFunction<dim>(),
+  //                                          boundary_values);
+  VectorTools::interpolate_boundary_values(dof_handler, 
+                                           types::boundary_id(BoundaryID::inlet), 
+                                           Functions::ZeroFunction<dim>(),
+                                           boundary_values);
+  // VectorTools::interpolate_boundary_values(dof_handler, 
+  //                                          types::boundary_id(BoundaryID::outlet), 
+  //                                          Functions::ZeroFunction<dim>(),
+  //                                          boundary_values);
+                                           
+  std::cout << boundary_values.size() << std::endl;
+
+  MatrixTools::apply_boundary_values(boundary_values, 
+                                     system_matrix,
+                                     solution,
+                                     system_rhs);
 }
+
+template <int dim>
+void NavierStokesProblem<dim>::solve()
+{
+  SolverControl            solver_control(1000, 1e-6 * system_rhs.l2_norm());
+  SolverCG<Vector<double>> solver(solver_control);
+  solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
+ 
+  std::cout << solver_control.last_step()
+            << " CG iterations needed to obtain convergence." << std::endl;
+}
+ 
+ 
+template <int dim>
+void NavierStokesProblem<dim>::output_results() const
+{
+  DataOut<dim> data_out;
+  data_out.attach_dof_handler(dof_handler);
+  data_out.add_data_vector(solution, "solution");
+  data_out.build_patches();
+ 
+  const std::string filename = "solution.vtk";
+  std::ofstream output(filename);
+  data_out.write_vtk(output);
+  std::cout << "Output written to " << filename << std::endl;
+}
+ 
+ 
 
 template <int dim>
 void NavierStokesProblem<dim>::setup_system()
@@ -124,6 +217,8 @@ void NavierStokesProblem<dim>::run()
   make_grid();
   setup_system();
   assemble_system();
+  solve();
+  output_results();
 }
 
 

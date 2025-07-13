@@ -16,7 +16,7 @@ BraceWrapping:
   BeforeElse: true
 
 AllowShortFunctionsOnASingleLine: Empty
-ColumnLimit: 100
+ColumnLimit: 70
 SpaceBeforeParens: ControlStatements
 PointerAlignment: Left
 DerivePointerAlignment: false

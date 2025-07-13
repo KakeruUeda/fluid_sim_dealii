@@ -6,6 +6,7 @@
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_tools.h>
 #include <deal.II/fe/fe_q.h>
+#include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_simplex_p.h>
 #include <deal.II/fe/fe_values.h>
 #include <deal.II/grid/grid_generator.h>
@@ -92,7 +93,7 @@ class NavierStokesProblem
   const unsigned int this_mpi_proc;
 
   parallel::shared::Triangulation<dim> triangulation;
-  const FE_SimplexP<dim> fe;
+  const FESystem<dim> fe;
   DoFHandler<dim> dof_handler;
   
   IndexSet locally_owned_dofs;
@@ -111,7 +112,7 @@ NavierStokesProblem<dim>::NavierStokesProblem()
   n_mpi_proc(Utilities::MPI::n_mpi_processes(mpi_comm)),
   this_mpi_proc(Utilities::MPI::this_mpi_process(mpi_comm)),
   triangulation(MPI_COMM_WORLD),
-  fe(1),
+  fe(FE_SimplexP<dim>(1) ^ dim, FE_SimplexP<dim>(1)),
   dof_handler(triangulation),
   pcout(std::cout, (this_mpi_proc == 0))
 {}
@@ -123,42 +124,52 @@ NavierStokesProblem<dim>::~NavierStokesProblem()
 }
 
 template <int dim>
-class RightHandSide : public Function<dim>
-{
- public:
-  virtual double value(
-    const Point<dim>& p, 
-    const unsigned int componet = 0
-  ) const override;
-};
-
-template <int dim>
 class BoundaryValues : public Function<dim>
 {
- public:
+public:
+  BoundaryValues();
+
   virtual double value(
     const Point<dim>& p, 
     const unsigned int component = 0
   ) const override;
 };
 
-template <int dim>
-double RightHandSide<dim>::value(
-  const Point<dim>& p, const unsigned int ) const
-{
-  double return_value = 0.0;
-  for (unsigned int i = 0; i < dim; ++i) 
-    return_value += 4.0 * std::pow(p(i), 4.0);
-
-  return return_value;
-}
+template<int dim>
+BoundaryValues<dim>::BoundaryValues()
+  : Function<dim>(dim+1)
+{}
 
 template <int dim>
 double BoundaryValues<dim>::value(
-  const Point<dim>& p, const unsigned int) const
+  const Point<dim>&, const unsigned int) const
 {
-  return p.square();
+  return 1.0;
 }
+
+template <int dim>
+class InletVelocity : public Function<dim>
+{
+public:
+  InletVelocity() : Function<dim>(dim+1) {}
+  virtual void vector_value(const Point<dim> &, Vector<double> &v) const override
+  {
+    v = 0;
+    v[2] = 1.0; 
+  }
+};
+
+template <int dim>
+class WallVelocity : public Function<dim>
+{
+public:
+  WallVelocity() : Function<dim>(dim+1) {}
+  virtual void vector_value(const Point<dim> &, Vector<double> &v) const override
+  {
+    v = 0;
+  }
+};
+
 
 template <int dim>
 void NavierStokesProblem<dim>::assemble_system()
@@ -168,39 +179,62 @@ void NavierStokesProblem<dim>::assemble_system()
   FEValues<dim> fe_values(
       fe, quadrature_formula,
       update_values | update_gradients | 
-      update_quadrature_points | update_JxW_values
-    );
+      update_quadrature_points | update_JxW_values);
 
   const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
-
+  const unsigned int n_q_points = quadrature_formula.size();
+  
   FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
   Vector<double> cell_rhs(dofs_per_cell);
-
+  
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-  RightHandSide<dim> right_hand_side;
+  
+  const FEValuesExtractors::Vector vel(0);
+  const FEValuesExtractors::Scalar pre(dim);
+  
+  std::vector<Tensor<2, dim>> grad_phi_u(dofs_per_cell);
+  std::vector<double>  div_phi_u(dofs_per_cell);
+  std::vector<Tensor<1, dim>> phi_u(dofs_per_cell);
+  std::vector<double>  phi_p(dofs_per_cell);
+  std::vector<Tensor<1, dim>> grad_phi_p(dofs_per_cell);
+
+  const double mu = 1.0;
 
   for (const auto& cell : dof_handler.active_cell_iterators())
   {
-    if (cell->subdomain_id() == this_mpi_proc)
+    if (cell->is_locally_owned())
     {
       fe_values.reinit(cell);
 
       cell_matrix = 0;
       cell_rhs = 0;
 
-      for (const unsigned int q_index : fe_values.quadrature_point_indices())
-      {
-        for (const unsigned int i : fe_values.dof_indices())
-          for (const unsigned int j : fe_values.dof_indices())
-            cell_matrix(i, j) += (fe_values.shape_grad(i, q_index) *
-                                  fe_values.shape_grad(j, q_index) * 
-                                  fe_values.JxW(q_index));
+      const double h = cell->diameter();
+      const double tau_pspg = h*h/mu/12e0;
 
-        const auto& x_q = fe_values.quadrature_point(q_index);
+      for (unsigned int q = 0; q < n_q_points; ++q)
+      {
+        for (unsigned int k : fe_values.dof_indices())
+        {
+          grad_phi_u[k] = fe_values[vel].gradient(k, q);
+          div_phi_u[k] = fe_values[vel].divergence(k, q);
+          phi_u[k] = fe_values[vel].value(k, q);
+          phi_p[k] = fe_values[pre].value(k, q);
+          grad_phi_p[k] = fe_values[pre].gradient(k, q);
+        }
+
         for (const unsigned int i : fe_values.dof_indices())
-          cell_rhs(i) += (fe_values.shape_value(i, q_index)) * 
-                          right_hand_side.value(x_q) *
-                          fe_values.JxW(q_index);
+        {
+          for (const unsigned int j : fe_values.dof_indices())
+          {
+            cell_matrix(i, j) += (
+              - mu * scalar_product(grad_phi_u[i], grad_phi_u[j])   
+              + div_phi_u[i] * phi_p[j]
+              + phi_p[i] * div_phi_u[j]     
+              + tau_pspg * grad_phi_p[i] * grad_phi_p[j]
+            ) * fe_values.JxW(q);
+          }
+        }
       }
       cell->get_dof_indices(local_dof_indices);
 
@@ -220,34 +254,34 @@ void NavierStokesProblem<dim>::assemble_system()
 
   std::map<types::global_dof_index, double> boundary_values;
 
-  // // VectorTools::interpolate_boundary_values(dof_handler,
-  // //                                          types::boundary_id(BoundaryID::wall),
-  // //                                          Functions::ZeroFunction<dim>(),
-  // //                                          boundary_values);
   VectorTools::interpolate_boundary_values(
-    dof_handler, types::boundary_id(BoundaryID::wall),
-    BoundaryValues<dim>(), boundary_values
+    dof_handler,
+    types::boundary_id(BoundaryID::inlet),
+    InletVelocity<dim>(),
+    boundary_values,
+    fe.component_mask(vel)
   );
-  // // VectorTools::interpolate_boundary_values(dof_handler,
-  // //                                          types::boundary_id(BoundaryID::outlet),
-  // //                                          Functions::ZeroFunction<dim>(),
-  // //                                          boundary_values);
 
-  // std::cout << boundary_values.size() << std::endl;
+  VectorTools::interpolate_boundary_values(
+    dof_handler,
+    types::boundary_id(BoundaryID::wall),
+    WallVelocity<dim>(),
+    boundary_values,
+    fe.component_mask(vel)
+  );
 
   MatrixTools::apply_boundary_values(
-    boundary_values, system_matrix, solution, system_rhs, false
-  );
+    boundary_values, system_matrix, solution, system_rhs, false);
 }
 
 template <int dim>
 unsigned int NavierStokesProblem<dim>::solve()
 {
   SolverControl solver_control(1000, 1e-6 * system_rhs.l2_norm());
-  PETScWrappers::SolverCG cg(solver_control);
+  PETScWrappers::SolverGMRES gmres(solver_control);
 
   PETScWrappers::PreconditionBlockJacobi preconditioner(system_matrix);
-  cg.solve(system_matrix, solution, system_rhs, preconditioner);
+  gmres.solve(system_matrix, solution, system_rhs, preconditioner);
 
   Vector<double> localized_solution(solution);
   solution = localized_solution;
@@ -255,12 +289,24 @@ unsigned int NavierStokesProblem<dim>::solve()
   return solver_control.last_step();
 }
 
+
 template <int dim>
 void NavierStokesProblem<dim>::output_results() const
 {
   DataOut<dim> data_out;
   data_out.attach_dof_handler(dof_handler);
-  data_out.add_data_vector(solution, "solution");
+
+  std::vector<std::string> solution_names(dim, "velocity");
+  solution_names.emplace_back("pressure");
+
+  std::vector<DataComponentInterpretation::DataComponentInterpretation>
+  interpretation(dim, DataComponentInterpretation::component_is_part_of_vector);
+  interpretation.push_back(DataComponentInterpretation::component_is_scalar);
+
+  data_out.add_data_vector(
+    solution, solution_names,
+    DataOut<dim>::type_dof_data,
+    interpretation);
 
   std::vector<unsigned int> partition_int(triangulation.n_active_cells());
   GridTools::get_subdomain_association(triangulation, partition_int);
@@ -276,24 +322,13 @@ void NavierStokesProblem<dim>::output_results() const
   data_out.write_hdf5_parallel(data_filter, "solution.h5", mpi_comm);
 
   auto new_xdmf_entry = data_out.create_xdmf_entry(
-    data_filter, "solution.h5", 0.0, mpi_comm
-  );
+      data_filter, "solution.h5", 0.0, mpi_comm);
   std::vector<XDMFEntry> xdmf_entries;
   xdmf_entries.push_back(new_xdmf_entry);
   data_out.write_xdmf_file(xdmf_entries, "solution.xdmf", mpi_comm);
-  // auto new_xdmf_entry = data_out.create
-
-  // const std::string pvtu_filename 
-  // = data_out.write_vtu_with_pvtu_record("./", "solution", 0, mpi_comm, 4);
-
-  // if (this_mpi_proc == 0)
-  // {
-  //   static std::vector<std::pair<double, std::string>> times_and_names;
-  //   times_and_names.emplace_back(0.0, pvtu_filename);
-  //   std::ofstream pvd_output("solution.pvd");
-  //   DataOutBase::write_pvd_record(pvd_output, times_and_names);
-  // }
 }
+
+
 template <int dim>
 void NavierStokesProblem<dim>::setup_system()
 {
@@ -333,14 +368,22 @@ void NavierStokesProblem<dim>::run()
 {
   make_grid();
   setup_system();
+  
+  pcout << "   Assembling..." 
+        << std::endl;
   assemble_system();
 
+  pcout << "   Solving..." 
+        << std::endl << std::endl;
   const unsigned int n_iter = solve();
-  pcout << "   Solver converged in " 
+
+  pcout << "Solver converged in " 
         << n_iter<< " iterations." 
         << std::endl;
 
   output_results();
+
+  pcout << "Completed." << std::endl;
 }
 
 using MyMPI = Utilities::MPI::MPI_InitFinalize;

@@ -5,5 +5,7 @@ output
 a.out
 *.vti
 *.vtu
+*.xdmf
+*.h5
 *.vscode
 *.json

@@ -357,7 +357,7 @@ void NavierStokesProblem<dim>::make_grid()
   GridIn<dim> gridin;
   gridin.attach_triangulation(triangulation);
 
-  std::ifstream f("../mesh/test.msh");
+  std::ifstream f("mesh/test.msh");
   gridin.read_msh(f);
 
   print_mesh_info(triangulation, "grid.vtu", pcout);

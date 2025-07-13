@@ -76,8 +76,13 @@ template <int dim>
 class NavierStokesProblem
 {
  public:
-  NavierStokesProblem();
-  ~NavierStokesProblem();
+  NavierStokesProblem()
+  : mpi_comm(MPI_COMM_WORLD),
+  n_mpi_proc(Utilities::MPI::n_mpi_processes(mpi_comm)),
+  this_mpi_proc(Utilities::MPI::this_mpi_process(mpi_comm)),
+  pcout(std::cout, (this_mpi_proc == 0)),
+  fe(1),
+  dof_handler(triangulation){}
   void run();
 
  private:
@@ -91,36 +96,16 @@ class NavierStokesProblem
   const unsigned int n_mpi_proc;
   const unsigned int this_mpi_proc;
 
-  parallel::shared::Triangulation<dim> triangulation;
+  ConditionalOStream pcout;
+
+  Triangulation<dim> triangulation;
   const FE_SimplexP<dim> fe;
   DoFHandler<dim> dof_handler;
-  
-  IndexSet locally_owned_dofs;
-  IndexSet locally_relevant_dofs;
-
-  ConditionalOStream pcout;
 
   PETScWrappers::MPI::SparseMatrix system_matrix;
   PETScWrappers::MPI::Vector solution;
   PETScWrappers::MPI::Vector system_rhs;
 };
-
-template <int dim>
-NavierStokesProblem<dim>::NavierStokesProblem()
-  : mpi_comm(MPI_COMM_WORLD),
-  n_mpi_proc(Utilities::MPI::n_mpi_processes(mpi_comm)),
-  this_mpi_proc(Utilities::MPI::this_mpi_process(mpi_comm)),
-  triangulation(MPI_COMM_WORLD),
-  fe(1),
-  dof_handler(triangulation),
-  pcout(std::cout, (this_mpi_proc == 0))
-{}
-
-template <int dim>
-NavierStokesProblem<dim>::~NavierStokesProblem()
-{
-  dof_handler.clear();
-}
 
 template <int dim>
 class RightHandSide : public Function<dim>
@@ -172,6 +157,7 @@ void NavierStokesProblem<dim>::assemble_system()
     );
 
   const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
+  const unsigned int n_q_points = quadrature_formula.size();
 
   FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
   Vector<double> cell_rhs(dofs_per_cell);
@@ -258,62 +244,49 @@ unsigned int NavierStokesProblem<dim>::solve()
 template <int dim>
 void NavierStokesProblem<dim>::output_results() const
 {
-  DataOut<dim> data_out;
-  data_out.attach_dof_handler(dof_handler);
-  data_out.add_data_vector(solution, "solution");
+  const Vector<double> localized_solution(solution);
 
-  std::vector<unsigned int> partition_int(triangulation.n_active_cells());
-  GridTools::get_subdomain_association(triangulation, partition_int);
-  const Vector<double> partitioning(partition_int.begin(), partition_int.end());
-  data_out.add_data_vector(partitioning, "partitioning");
+  if (this_mpi_proc == 0)
+  {
+    std::ofstream output("solution.vtk");
+    DataOut<dim> data_out;
+    data_out.attach_dof_handler(dof_handler);
 
-  data_out.build_patches();
-
-  DataOutBase::DataOutFilterFlags flags(true, true);
-  DataOutBase::DataOutFilter data_filter(flags);
-
-  data_out.write_filtered_data(data_filter);
-  data_out.write_hdf5_parallel(data_filter, "solution.h5", mpi_comm);
-
-  auto new_xdmf_entry = data_out.create_xdmf_entry(
-    data_filter, "solution.h5", 0.0, mpi_comm
-  );
-  std::vector<XDMFEntry> xdmf_entries;
-  xdmf_entries.push_back(new_xdmf_entry);
-  data_out.write_xdmf_file(xdmf_entries, "solution.xdmf", mpi_comm);
-  // auto new_xdmf_entry = data_out.create
-
-  // const std::string pvtu_filename 
-  // = data_out.write_vtu_with_pvtu_record("./", "solution", 0, mpi_comm, 4);
-
-  // if (this_mpi_proc == 0)
-  // {
-  //   static std::vector<std::pair<double, std::string>> times_and_names;
-  //   times_and_names.emplace_back(0.0, pvtu_filename);
-  //   std::ofstream pvd_output("solution.pvd");
-  //   DataOutBase::write_pvd_record(pvd_output, times_and_names);
-  // }
+    data_out.add_data_vector(localized_solution, "solution");
+ 
+    std::vector<unsigned int> partition_int(triangulation.n_active_cells());
+    GridTools::get_subdomain_association(triangulation, partition_int);
+ 
+    const Vector<double> partitioning(partition_int.begin(),
+                                      partition_int.end());
+    
+    data_out.add_data_vector(partitioning, "partitioning");
+ 
+    data_out.build_patches();
+    data_out.write_vtk(output);                                      
+  }
 }
+
 template <int dim>
 void NavierStokesProblem<dim>::setup_system()
 {
+  GridTools::partition_triangulation(n_mpi_proc, triangulation);
+
   dof_handler.distribute_dofs(fe);
+  DoFRenumbering::subdomain_wise(dof_handler);
 
-  locally_owned_dofs = dof_handler.locally_owned_dofs();
-  locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
-  
-  DynamicSparsityPattern sparsity_pattern(locally_relevant_dofs);
-  DoFTools::make_sparsity_pattern(dof_handler, sparsity_pattern);
+  DynamicSparsityPattern dsp(dof_handler.n_dofs());
+  DoFTools::make_sparsity_pattern(dof_handler, dsp);
 
-  SparsityTools::distribute_sparsity_pattern(
-    sparsity_pattern, locally_owned_dofs, mpi_comm, locally_relevant_dofs
-  );
+  const std::vector<IndexSet> locally_owned_dofs_per_proc 
+    = DoFTools::locally_owned_dofs_per_subdomain(dof_handler);
+  const IndexSet& locally_owned_dofs 
+    = locally_owned_dofs_per_proc[this_mpi_proc];
 
-  system_matrix.reinit(
-    locally_owned_dofs, locally_owned_dofs, sparsity_pattern, mpi_comm
-  );
-  system_rhs.reinit(locally_owned_dofs, mpi_comm);
+  system_matrix.reinit(locally_owned_dofs, locally_owned_dofs, dsp, mpi_comm);
+
   solution.reinit(locally_owned_dofs, mpi_comm);
+  system_rhs.reinit(locally_owned_dofs, mpi_comm);
 }
 
 template <int dim>

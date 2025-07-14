@@ -12,16 +12,6 @@
 using namespace dealii;
 
 /**
- * @brief Boundary ID definitions.
- */
-enum class BoundaryID
-{
-  wall = 4,
-  inlet = 5,
-  outlet = 6
-};
-
-/**
  * @brief Uniform inlet velocity boundary condition.
  *
  * The velocity is set to a constant value in the specified direction.

@@ -1,7 +1,10 @@
 #pragma once 
 #include <pde_base.h>
 #include <boundary_conditions.h>
+#include "runtime_params_stokes.h"
 
+#include <string>
+#include <sys/stat.h>
 
 template <int dim>
 class StokesPSPG : public PDEBase<dim>
@@ -14,12 +17,14 @@ public:
   using PDEBase<dim>::dof_handler;
   using PDEBase<dim>::make_grid;
 
-  StokesPSPG() = default;
+  StokesPSPG(const RuntimeParams_Stokes &params);
   ~StokesPSPG() override = default;
 
   void run();
 
 private:
+  const double mu;
+  
   IndexSet locally_owned_dofs;
   IndexSet locally_relevant_dofs;
 
@@ -31,6 +36,20 @@ private:
   void assemble_system();
   unsigned int solve();
 };
+
+template <int dim>
+StokesPSPG<dim>::StokesPSPG(
+    const RuntimeParams_Stokes &params)
+    : PDEBase<dim>(params)
+    , mu(params.mu)
+{
+  std::string dir;
+  std::string outputs_parent = "outputs";
+  mkdir(outputs_parent.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+
+  this->output_dir = "outputs/" + this->output_dir;
+  mkdir(this->output_dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+}
 
 template <int dim>
 void StokesPSPG<dim>::run()
@@ -51,8 +70,8 @@ void StokesPSPG<dim>::run()
         << n_iter<< " iterations." 
         << std::endl;
 
-  output_results(triangulation, dof_handler, 
-                 solution, mpi_comm, 0);
+  output_results(this->output_dir, triangulation, 
+                 dof_handler, solution, mpi_comm, 0);
 
   pcout << "Completed." << std::endl;
 }
@@ -106,8 +125,6 @@ void StokesPSPG<dim>::assemble_system()
   std::vector<Tensor<1, dim>> phi_u(dofs_per_cell);
   std::vector<double>  phi_p(dofs_per_cell);
   std::vector<Tensor<1, dim>> grad_phi_p(dofs_per_cell);
-
-  const double mu = 1.0;
 
   for (const auto& cell : dof_handler.active_cell_iterators())
   {
@@ -165,7 +182,7 @@ void StokesPSPG<dim>::assemble_system()
 
   VectorTools::interpolate_boundary_values(
     dof_handler,
-    types::boundary_id(BoundaryID::inlet),
+    types::boundary_id(this->inlet_label),
     InletVelocityUniform<dim>(2, 1.0),
     boundary_values,
     fe.component_mask(vel)
@@ -173,7 +190,7 @@ void StokesPSPG<dim>::assemble_system()
 
   VectorTools::interpolate_boundary_values(
     dof_handler,
-    types::boundary_id(BoundaryID::wall),
+    types::boundary_id(this->wall_label),
     WallVelocity<dim>(0.0),
     boundary_values,
     fe.component_mask(vel)

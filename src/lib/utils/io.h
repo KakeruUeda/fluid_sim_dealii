@@ -5,7 +5,7 @@
 
 template <int dim>
 void print_mesh_info(const Triangulation<dim>& triangulation, 
-                     ConditionalOStream& pcout, const bool output_grid)
+                     ConditionalOStream& pcout)
 {
   pcout << "Mesh info:" << std::endl
         << " dimension: " << dim << std::endl
@@ -23,19 +23,12 @@ void print_mesh_info(const Triangulation<dim>& triangulation,
     }
     pcout << std::endl;
   }
-
-  if (output_grid)
-  {
-    std::ofstream out("grid.vtu");
-    GridOut grid_out;
-    grid_out.write_vtu(triangulation, out);
-    pcout << " written to " << "grid.vtu" << std::endl << std::endl;
-  }
 }
 
 
 template <int dim>
-void output_results(const Triangulation<dim>& triangulation, 
+void output_results(std::string output_dir,
+                    const Triangulation<dim>& triangulation, 
                     DoFHandler<dim> &dof_handler, 
                     PETScWrappers::MPI::Vector &solution,
                     MPI_Comm &mpi_comm,
@@ -67,12 +60,12 @@ void output_results(const Triangulation<dim>& triangulation,
   DataOutBase::DataOutFilter data_filter(flags);
 
   data_out.write_filtered_data(data_filter);
-  data_out.write_hdf5_parallel(data_filter, "solution.h5", mpi_comm);
+  data_out.write_hdf5_parallel(data_filter, output_dir + "/solution.h5", mpi_comm);
 
   auto new_xdmf_entry = data_out.create_xdmf_entry(
       data_filter, "solution.h5", step, mpi_comm);
   static std::vector<XDMFEntry> xdmf_entries;
   xdmf_entries.push_back(new_xdmf_entry);
-  data_out.write_xdmf_file(xdmf_entries, "solution.xdmf", mpi_comm);
+  data_out.write_xdmf_file(xdmf_entries, output_dir + "/solution.xdmf", mpi_comm);
 }
 

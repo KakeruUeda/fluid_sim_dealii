@@ -1,5 +1,5 @@
 /* ---------------------
- * stokes.cc
+ * navier_stokes.cc
  *
  * Copyright (C) 2025
  * All rights reserved.
@@ -10,7 +10,7 @@
  * Date: Jun, 2025
  */
 
-#include <stokes.h>
+#include <navier_stokes.h>
 
 using Utilities::MPI::MPI_InitFinalize;
 
@@ -20,11 +20,11 @@ int main(int argc, char* argv[])
   {
     MPI_InitFinalize mpi_init(argc, argv, 1);
 
-    RuntimeParams_Stokes params;
+    RuntimeParams_NavierStokes params;
     params.read_params("params.prm");
 
-    StokesPSPG<3> stokes(params);
-    stokes.run();
+    NavierStokesGLS<3> navier(params);
+    navier.run();
   }
   catch (std::exception& exc)
   {

@@ -36,8 +36,9 @@
 #include <fstream>
 #include <iostream>
 
-#include <boundary_conditions.h>
-#include <io.h>
+#include "boundary_conditions.h"
+#include "io.h"
+#include "runtime_params_base.h"
 
 using namespace dealii;
 
@@ -45,13 +46,20 @@ template <int dim>
 class PDEBase
 {
 public:
-  PDEBase();
+  PDEBase(const RuntimeParams &params);
   virtual ~PDEBase();
 
 protected:
   MPI_Comm mpi_comm;
   const unsigned int n_mpi_proc;
   const unsigned int this_mpi_proc;
+
+  std::string output_dir;
+  const std::string mesh_dir;
+
+  const unsigned int inlet_label;
+  const unsigned int outlet_label;
+  const unsigned int wall_label;
 
   parallel::shared::Triangulation<dim> triangulation;
   const FESystem<dim> fe;
@@ -63,14 +71,20 @@ protected:
 };
 
 template <int dim>
-PDEBase<dim>::PDEBase()
-  : mpi_comm(MPI_COMM_WORLD),
-  n_mpi_proc(Utilities::MPI::n_mpi_processes(mpi_comm)),
-  this_mpi_proc(Utilities::MPI::this_mpi_process(mpi_comm)),
-  triangulation(MPI_COMM_WORLD),
-  fe(FE_SimplexP<dim>(1) ^ dim, FE_SimplexP<dim>(1)),
-  dof_handler(triangulation),
-  pcout(std::cout, (this_mpi_proc == 0))
+PDEBase<dim>::PDEBase(const RuntimeParams &params)
+  : mpi_comm(MPI_COMM_WORLD)
+  , n_mpi_proc(Utilities::MPI::n_mpi_processes(mpi_comm))
+  , this_mpi_proc(Utilities::MPI::this_mpi_process(mpi_comm))
+  , output_dir(params.output_dir)
+  , mesh_dir(params.mesh_dir)
+  , inlet_label(params.inlet_label)
+  , outlet_label(params.outlet_label)
+  , wall_label(params.wall_label)
+  , triangulation(MPI_COMM_WORLD)
+  , fe(FE_SimplexP<dim>(params.degree_vel) ^ dim,
+       FE_SimplexP<dim>(params.degree_pre))
+  , dof_handler(triangulation)
+  , pcout(std::cout, (this_mpi_proc == 0))
 {}
 
 // -------- Implementation --------
@@ -87,10 +101,18 @@ void PDEBase<dim>::make_grid()
   GridIn<dim> gridin;
   gridin.attach_triangulation(triangulation);
 
-  std::ifstream f("mesh/test.msh");
+  std::ifstream f(mesh_dir);
   gridin.read_msh(f);
 
-  if (this_mpi_proc == 0)
-    print_mesh_info(triangulation, pcout, true);
+  print_mesh_info(triangulation, pcout);
+
+  bool output_grid = true;
+  if (output_grid && this_mpi_proc == 0)
+  {
+    std::ofstream out(output_dir + "/grid.vtu");
+    GridOut grid_out;
+    grid_out.write_vtu(triangulation, out);
+    pcout << " written to " << "grid.vtu" << std::endl << std::endl;
+  }
 }
 

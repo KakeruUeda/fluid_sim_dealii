@@ -1,5 +1,5 @@
 #pragma once
-#include <stokes_problem.h>
+#include <stokes.h>
 
 template <int dim>
 class Test

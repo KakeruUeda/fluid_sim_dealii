@@ -1,8 +1,8 @@
 subsection mesh
-  set mesh_dir = ../../mesh/cavity.msh
-  set inlet_label = 6
-  set outlet_label = 8
-  set wall_label = 7
+  set mesh_dir = ../../mesh/aneurysm.msh
+  set inlet_label = 4
+  set outlet_label = 5
+  set wall_label = 6
 end
 
 subsection finite element
@@ -12,9 +12,9 @@ end
 
 subsection fluid
   set dt = 0.1
-  set t_end = 100
-  set mu = 100
-  set rho = 100000.0
+  set t_end = 50
+  set mu = 1.0
+  set rho = 200.0
 end
 
 set output_interval = 10

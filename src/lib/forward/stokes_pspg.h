@@ -114,7 +114,7 @@ void StokesPSPG<dim>::assemble_system()
   
   FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
   Vector<double> cell_rhs(dofs_per_cell);
-  
+
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
   
   const FEValuesExtractors::Vector vel(0);
@@ -128,7 +128,7 @@ void StokesPSPG<dim>::assemble_system()
 
   for (const auto& cell : dof_handler.active_cell_iterators())
   {
-    if (cell->is_locally_owned())
+    if (cell->subdomain_id() == this->this_mpi_proc)
     {
       fe_values.reinit(cell);
 
@@ -154,8 +154,9 @@ void StokesPSPG<dim>::assemble_system()
           for (const unsigned int j : fe_values.dof_indices())
           {
             cell_matrix(i, j) += (
-              - mu * scalar_product(grad_phi_u[i], grad_phi_u[j])   
-              + div_phi_u[i] * phi_p[j]
+              // + (1e0/0.001)*phi_u[i]*phi_u[j]
+              + mu * scalar_product(grad_phi_u[i], grad_phi_u[j])   
+              - div_phi_u[i] * phi_p[j]
               + phi_p[i] * div_phi_u[j]     
               + tau_pspg * grad_phi_p[i] * grad_phi_p[j]
             ) * fe_values.JxW(q);
@@ -183,10 +184,18 @@ void StokesPSPG<dim>::assemble_system()
   VectorTools::interpolate_boundary_values(
     dof_handler,
     types::boundary_id(this->inlet_label),
-    InletVelocityUniform<dim>(2, 1.0),
+    InletVelocityUniform<dim>(0, 1.0),
     boundary_values,
     fe.component_mask(vel)
   );
+
+  // VectorTools::interpolate_boundary_values(
+  //   dof_handler,
+  //   types::boundary_id(this->outlet_label),
+  //   InletVelocityUniform<dim>(2, 0.0),
+  //   boundary_values,
+  //   fe.component_mask(pre)
+  // );
 
   VectorTools::interpolate_boundary_values(
     dof_handler,
@@ -204,7 +213,7 @@ void StokesPSPG<dim>::assemble_system()
 template <int dim>
 unsigned int StokesPSPG<dim>::solve()
 {
-  SolverControl solver_control(1000, 1e-6 * system_rhs.l2_norm());
+  SolverControl solver_control(10000, 1e-6 * system_rhs.l2_norm());
   PETScWrappers::SolverGMRES gmres(solver_control);
 
   PETScWrappers::PreconditionBlockJacobi preconditioner(system_matrix);

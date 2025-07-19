@@ -1,8 +1,8 @@
 subsection mesh
-  set mesh_dir = ../../mesh/aneurysm.msh
-  set inlet_label = 4
-  set outlet_label = 5
-  set wall_label = 6
+  set mesh_dir = ../../mesh/straight_tube.msh
+  set inlet_label = 6
+  set outlet_label = 8
+  set wall_label = 9
 end
 
 subsection finite element
@@ -11,7 +11,7 @@ subsection finite element
 end
 
 subsection fluid
-  set mu = 1.0
+  set mu = 0.01
 end
 
 set output_dir = test

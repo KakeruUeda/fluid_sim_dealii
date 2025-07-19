@@ -10,7 +10,7 @@
  * Date: Jun, 2025
  */
 
-#include <navier_stokes.h>
+#include <navier_stokes_gls.h>
 
 using Utilities::MPI::MPI_InitFinalize;
 
@@ -23,7 +23,7 @@ int main(int argc, char* argv[])
     RuntimeParams_NavierStokes params;
     params.read_params("params.prm");
 
-    NavierStokesGLS<3> navier(params);
+    NavierStokesGLS<2> navier(params);
     navier.run();
   }
   catch (std::exception& exc)

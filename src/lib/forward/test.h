@@ -1,5 +1,5 @@
 #pragma once
-#include <stokes.h>
+#include <stokes_pspg.h>
 
 template <int dim>
 class Test

@@ -10,7 +10,7 @@
  * Date: Jun, 2025
  */
 
-#include <stokes.h>
+#include <stokes_pspg.h>
 
 using Utilities::MPI::MPI_InitFinalize;
 
@@ -23,7 +23,7 @@ int main(int argc, char* argv[])
     RuntimeParams_Stokes params;
     params.read_params("params.prm");
 
-    StokesPSPG<3> stokes(params);
+    StokesPSPG<2> stokes(params);
     stokes.run();
   }
   catch (std::exception& exc)

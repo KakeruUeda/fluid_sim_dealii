@@ -81,11 +81,12 @@ PDEBase<dim>::PDEBase(const RuntimeParams &params)
   , outlet_label(params.outlet_label)
   , wall_label(params.wall_label)
   , triangulation(MPI_COMM_WORLD)
-  , fe(FE_SimplexP<dim>(params.degree_vel) ^ dim,
+  , fe(FE_SimplexP<dim>(params.degree_vel)^dim,
        FE_SimplexP<dim>(params.degree_pre))
   , dof_handler(triangulation)
   , pcout(std::cout, (this_mpi_proc == 0))
-{}
+{
+}
 
 // -------- Implementation --------
 

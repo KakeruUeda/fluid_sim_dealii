@@ -31,7 +31,7 @@ template <int dim>
 void output_results(std::string output_dir,
                     const Triangulation<dim>& triangulation, 
                     DoFHandler<dim> &dof_handler, 
-                    PETScWrappers::MPI::Vector &solution,
+                    Vector<double> &solution,
                     MPI_Comm &mpi_comm,
                     unsigned int step)
 {

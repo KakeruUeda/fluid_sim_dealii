@@ -1,0 +1,29 @@
+subsection mesh
+  set mesh_dir = ../../../mesh/cavity.msh
+end
+
+subsection boundary conditions
+  set n_bcs = 4
+
+  # ---- (boundary_id, dir, value, type)
+  set bc0 = (6, 0, 1.0, uniform) 
+  set bc1 = (6, 1, 0.0, uniform)
+  set bc2 = (7, 0, 0.0, uniform)
+  set bc3 = (7, 1, 0.0, uniform)
+end
+
+subsection finite element
+  set degree_vel = 1
+  set degree_pre = 1
+end
+
+subsection fluid
+  set dt = 0.1
+  set t_end = 1
+  set mu = 1
+  set rho = 100.0
+end
+
+set output_interval = 10
+set verbose = false
+

@@ -1,6 +1,19 @@
+/* ---------------------
+ * navier_stokes.h
+ *
+ * Copyright (C) 2025
+ * All rights reserved.
+ *
+ * ---------------------
+ *
+ * Author: Kakeru Ueda
+ */
+
 #pragma once 
-#include <pde_base.h>
-#include <boundary_conditions.h>
+#include <deal.II/base/parameter_handler.h>
+
+#include "pde_base.h"
+#include "boundary_conditions.h"
 #include "runtime_params_stokes.h"
 
 #include <string>
@@ -15,26 +28,40 @@ public:
   using PDEBase<dim>::fe;
   using PDEBase<dim>::triangulation;
   using PDEBase<dim>::dof_handler;
+  using PDEBase<dim>::bcs;
   using PDEBase<dim>::make_grid;
 
-  StokesPSPG(const RuntimeParams_Stokes &params);
+  StokesPSPG(
+    const RuntimeParams_Stokes &params);
   ~StokesPSPG() override = default;
 
   void run();
 
 private:
   const double mu;
-  
+
   IndexSet locally_owned_dofs;
   IndexSet locally_relevant_dofs;
 
+  const FEValuesExtractors::Vector vel_ext;
+  const FEValuesExtractors::Scalar pre_ext;
+
+  const QGaussSimplex <dim> q_gauss;
+
   PETScWrappers::MPI::SparseMatrix system_matrix;
-  PETScWrappers::MPI::Vector solution;
   PETScWrappers::MPI::Vector system_rhs;
+  PETScWrappers::MPI::Vector solution;
 
   void setup_system();
   void assemble_system();
-  unsigned int solve();
+  void solve_system();
+  
+  void assemble_matrix(
+    FullMatrix<double> &cell_matrix, FEValues<dim> &fe_values, 
+    const double tau, const unsigned int q);
+
+  void apply_dirichlet_boundary_conditions(
+    std::map<types::global_dof_index, double>& boundary_values);
 };
 
 template <int dim>
@@ -42,10 +69,12 @@ StokesPSPG<dim>::StokesPSPG(
     const RuntimeParams_Stokes &params)
     : PDEBase<dim>(params)
     , mu(params.mu)
+    , vel_ext(0)
+    , pre_ext(dim)
+    , q_gauss(2)
 {
-  std::string dir;
-  std::string outputs_parent = "outputs";
-  mkdir(outputs_parent.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+  std::string output_dir_tmp = "outputs";
+  mkdir(output_dir_tmp.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
 
   this->output_dir = "outputs/" + this->output_dir;
   mkdir(this->output_dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
@@ -56,115 +85,152 @@ void StokesPSPG<dim>::run()
 {
   make_grid();
   setup_system();
-  
-  pcout << "   Assembling..." 
-        << std::endl;
-  
+
   assemble_system();
+  solve_system();
 
-  pcout << "   Solving..." 
-        << std::endl << std::endl;
-  const unsigned int n_iter = solve();
+  Vector<double> solution_global(solution);
+  
+  output_results(
+    this->output_dir, triangulation, 
+    dof_handler, solution_global, mpi_comm, 0);
 
-  pcout << "Solver converged in " 
-        << n_iter<< " iterations." 
-        << std::endl;
-
-  output_results(this->output_dir, triangulation, 
-                 dof_handler, solution, mpi_comm, 0);
-
+  write_final_xdmf<dim>(this->output_dir, mpi_comm);
+  
   pcout << "Completed." << std::endl;
 }
-
 
 template <int dim>
 void StokesPSPG<dim>::setup_system()
 {
   dof_handler.distribute_dofs(fe);
 
-  locally_owned_dofs = dof_handler.locally_owned_dofs();
-  locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
-  
+  locally_owned_dofs
+   = dof_handler.locally_owned_dofs();
+  locally_relevant_dofs 
+  = DoFTools::extract_locally_relevant_dofs(dof_handler);
+
   DynamicSparsityPattern sparsity_pattern(locally_relevant_dofs);
-  DoFTools::make_sparsity_pattern(dof_handler, sparsity_pattern);
+  DoFTools::make_sparsity_pattern(
+    dof_handler, sparsity_pattern);
 
   SparsityTools::distribute_sparsity_pattern(
-    sparsity_pattern, locally_owned_dofs, mpi_comm, locally_relevant_dofs
-  );
+    sparsity_pattern, locally_owned_dofs,
+    mpi_comm, locally_relevant_dofs);
 
   system_matrix.reinit(
-    locally_owned_dofs, locally_owned_dofs, sparsity_pattern, mpi_comm
-  );
+    locally_owned_dofs, locally_owned_dofs,
+    sparsity_pattern, mpi_comm);
+ 
   system_rhs.reinit(locally_owned_dofs, mpi_comm);
   solution.reinit(locally_owned_dofs, mpi_comm);
 }
 
 template <int dim>
+void StokesPSPG<dim>::assemble_matrix(
+  FullMatrix<double> &cell_matrix, FEValues<dim> &fe_values, 
+  const double tau, const unsigned int q)
+{
+  const auto &phi_u = fe_values[vel_ext];
+  const auto &phi_p = fe_values[pre_ext];
+
+  for (const unsigned int i : fe_values.dof_indices())
+  {
+    for (const unsigned int j : fe_values.dof_indices())
+    {
+      // diffusion term 
+      cell_matrix(i, j) += mu*(
+        scalar_product(phi_u.gradient(i, q), phi_u.gradient(j, q))
+      )*fe_values.JxW(q);
+
+      // pressure term
+      cell_matrix(i, j) -= (
+        phi_u.divergence(i, q)*phi_p.value(j, q)
+      )*fe_values.JxW(q);
+
+      // continuity term
+      cell_matrix(i, j) += (
+        phi_p.value(i, q)*phi_u.divergence(j, q) 
+      )*fe_values.JxW(q);
+
+      // PSPG pressure term
+      cell_matrix(i, j) += tau*(
+        phi_p.gradient(i, q)*phi_p.gradient(j, q)
+      )*fe_values.JxW(q);
+    }
+  }
+}
+
+template <int dim>
+void StokesPSPG<dim>::apply_dirichlet_boundary_conditions(
+  std::map<types::global_dof_index, double>& boundary_values)
+{
+  for (const auto &bc : bcs)
+  {
+    if (bc.dir == dim) 
+    {
+      VectorTools::interpolate_boundary_values(
+        dof_handler,
+        types::boundary_id(bc.id),
+        VelocityUniform<dim>(bc.dir, bc.value),
+        boundary_values,
+        fe.component_mask(pre_ext)
+      );
+    }
+    else
+    {
+      ComponentMask mask = fe.component_mask(vel_ext);
+      for (unsigned int d = 0; d < mask.size(); ++d)
+        mask.set(d, false);
+      mask.set(bc.dir, true);
+
+      VectorTools::interpolate_boundary_values(
+        dof_handler,
+        types::boundary_id(bc.id),
+        VelocityUniform<dim>(bc.dir, bc.value),
+        boundary_values,
+        mask
+      );
+    }
+  }
+}
+
+template <int dim>
 void StokesPSPG<dim>::assemble_system()
 {
-  const QGauss<dim> quadrature_formula(fe.degree + 1);
-
   FEValues<dim> fe_values(
-      fe, quadrature_formula,
-      update_values | update_gradients | 
-      update_quadrature_points | update_JxW_values);
+    fe, q_gauss,
+    update_values | update_gradients | 
+    update_quadrature_points | update_JxW_values);
 
   const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
-  const unsigned int n_q_points = quadrature_formula.size();
+  const unsigned int n_q_points = q_gauss.size();
   
   FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
   Vector<double> cell_rhs(dofs_per_cell);
-
+  
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-  
-  const FEValuesExtractors::Vector vel(0);
-  const FEValuesExtractors::Scalar pre(dim);
-  
-  std::vector<Tensor<2, dim>> grad_phi_u(dofs_per_cell);
-  std::vector<double>  div_phi_u(dofs_per_cell);
-  std::vector<Tensor<1, dim>> phi_u(dofs_per_cell);
-  std::vector<double>  phi_p(dofs_per_cell);
-  std::vector<Tensor<1, dim>> grad_phi_p(dofs_per_cell);
+
+  system_matrix = 0;
+  system_rhs = 0;
 
   for (const auto& cell : dof_handler.active_cell_iterators())
   {
-    if (cell->subdomain_id() == this->this_mpi_proc)
+    if (cell->is_locally_owned())
     {
       fe_values.reinit(cell);
 
       cell_matrix = 0;
       cell_rhs = 0;
-
-      const double h = cell->diameter();
-      const double tau_pspg = h*h/mu/12e0;
-
+ 
       for (unsigned int q = 0; q < n_q_points; ++q)
       {
-        for (unsigned int k : fe_values.dof_indices())
-        {
-          grad_phi_u[k] = fe_values[vel].gradient(k, q);
-          div_phi_u[k] = fe_values[vel].divergence(k, q);
-          phi_u[k] = fe_values[vel].value(k, q);
-          phi_p[k] = fe_values[pre].value(k, q);
-          grad_phi_p[k] = fe_values[pre].gradient(k, q);
-        }
-
-        for (const unsigned int i : fe_values.dof_indices())
-        {
-          for (const unsigned int j : fe_values.dof_indices())
-          {
-            cell_matrix(i, j) += (
-              // + (1e0/0.001)*phi_u[i]*phi_u[j]
-              + mu * scalar_product(grad_phi_u[i], grad_phi_u[j])   
-              - div_phi_u[i] * phi_p[j]
-              + phi_p[i] * div_phi_u[j]     
-              + tau_pspg * grad_phi_p[i] * grad_phi_p[j]
-            ) * fe_values.JxW(q);
-          }
-        }
+        auto h = cell->diameter();
+        const double tau = h*h/mu/12e0;
+        assemble_matrix(cell_matrix, fe_values, tau, q);
       }
       cell->get_dof_indices(local_dof_indices);
-
+        
       for (const unsigned int i : fe_values.dof_indices())
         for (const unsigned int j : fe_values.dof_indices())
           system_matrix.add(local_dof_indices[i], 
@@ -181,46 +247,19 @@ void StokesPSPG<dim>::assemble_system()
 
   std::map<types::global_dof_index, double> boundary_values;
 
-  VectorTools::interpolate_boundary_values(
-    dof_handler,
-    types::boundary_id(this->inlet_label),
-    InletVelocityUniform<dim>(0, 1.0),
-    boundary_values,
-    fe.component_mask(vel)
-  );
-
-  // VectorTools::interpolate_boundary_values(
-  //   dof_handler,
-  //   types::boundary_id(this->outlet_label),
-  //   InletVelocityUniform<dim>(2, 0.0),
-  //   boundary_values,
-  //   fe.component_mask(pre)
-  // );
-
-  VectorTools::interpolate_boundary_values(
-    dof_handler,
-    types::boundary_id(this->wall_label),
-    WallVelocity<dim>(0.0),
-    boundary_values,
-    fe.component_mask(vel)
-  );
-
+  apply_dirichlet_boundary_conditions(boundary_values);
   MatrixTools::apply_boundary_values(
-    boundary_values, system_matrix, solution, system_rhs, false);
+      boundary_values, system_matrix, solution, system_rhs, false);
 }
 
-
 template <int dim>
-unsigned int StokesPSPG<dim>::solve()
-{
-  SolverControl solver_control(10000, 1e-6 * system_rhs.l2_norm());
+void StokesPSPG<dim>::solve_system()
+{    
+  SolverControl solver_control(10000, 1e-6*system_rhs.l2_norm());
   PETScWrappers::SolverGMRES gmres(solver_control);
 
   PETScWrappers::PreconditionBlockJacobi preconditioner(system_matrix);
   gmres.solve(system_matrix, solution, system_rhs, preconditioner);
 
-  Vector<double> localized_solution(solution);
-  solution = localized_solution;
-
-  return solver_control.last_step();
+  // return solver_control.last_step();
 }

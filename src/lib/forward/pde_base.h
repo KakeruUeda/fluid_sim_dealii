@@ -61,6 +61,8 @@ protected:
   const unsigned int outlet_label;
   const unsigned int wall_label;
 
+  const std::vector<BoundaryConditions> bcs;
+
   parallel::shared::Triangulation<dim> triangulation;
   const FESystem<dim> fe;
   DoFHandler<dim> dof_handler;
@@ -80,6 +82,7 @@ PDEBase<dim>::PDEBase(const RuntimeParams &params)
   , inlet_label(params.inlet_label)
   , outlet_label(params.outlet_label)
   , wall_label(params.wall_label)
+  , bcs(params.bcs)
   , triangulation(MPI_COMM_WORLD)
   , fe(FE_SimplexP<dim>(params.degree_vel)^dim,
        FE_SimplexP<dim>(params.degree_pre))

@@ -23,8 +23,20 @@ int main(int argc, char* argv[])
     RuntimeParams_NavierStokes params;
     params.read_params("params.prm");
 
+#if SPATIAL_DIMENSION == 2
     NavierStokesGLS<2> navier(params);
     navier.run();
+    
+#elif SPATIAL_DIMENSION == 3
+    NavierStokesGLS<3> navier(params);
+    navier.run();
+    
+#else
+    static_assert(
+      SPATIAL_DIMENSION == 2 ||
+      SPATIAL_DIMENSION  == 3,
+      "Unsupported SPATIAL_DIMENSION");
+#endif
   }
   catch (std::exception& exc)
   {

@@ -12,13 +12,28 @@
 using namespace dealii;
 
 /**
+ * @brief Struct representing a 
+ * single boundary condition entry.
+ *
+ * Contains the boundary ID, 
+ * direction, value, and type.
+ */
+struct BoundaryConditions
+{
+  unsigned int id;
+  unsigned int dir;
+  double value;
+  std::string type;
+};
+
+/**
  * @brief Uniform inlet velocity boundary condition.
  *
  * The velocity is set to a constant value in the specified direction.
  * @tparam dim Spatial dimension.
  */
 template <int dim>
-class InletVelocityUniform : public Function<dim>
+class VelocityUniform : public Function<dim>
 {
  public:
   /**
@@ -26,7 +41,7 @@ class InletVelocityUniform : public Function<dim>
    * @param dir Direction of the non-zero velocity component.
    * @param value Magnitude of the velocity.
    */
-  InletVelocityUniform(const unsigned int dir, const double value);
+  VelocityUniform(const unsigned int dir, const double value);
 
   /**
    * @brief Evaluates the velocity vector at a given point.
@@ -69,17 +84,16 @@ class WallVelocity : public Function<dim>
 // -------- Implementation --------
 
 template <int dim>
-InletVelocityUniform<dim>::InletVelocityUniform(
+VelocityUniform<dim>::VelocityUniform(
     const unsigned int dir, const double value)
     : Function<dim>(dim + 1), dir(dir), value(value)
 {
 }
 
 template <int dim>
-void InletVelocityUniform<dim>::vector_value(const Point<dim>&,
-                                             Vector<double>& v) const
+void VelocityUniform<dim>::vector_value(
+  const Point<dim>&, Vector<double>& v) const
 {
-  v = 0;
   v[dir] = value;
 }
 

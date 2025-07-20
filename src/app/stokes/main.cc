@@ -23,8 +23,20 @@ int main(int argc, char* argv[])
     RuntimeParams_Stokes params;
     params.read_params("params.prm");
 
+#if SPATIAL_DIMENSION == 2
     StokesPSPG<2> stokes(params);
     stokes.run();
+
+#elif SPATIAL_DIMENSION == 3
+    StokesPSPG<3> stokes(params);
+    stokes.run();
+    
+#else
+    static_assert(
+      SPATIAL_DIMENSION == 2 || 
+      SPATIAL_DIMENSION == 3,
+      "Unsupported SPATIAL_DIMENSION");
+#endif
   }
   catch (std::exception& exc)
   {

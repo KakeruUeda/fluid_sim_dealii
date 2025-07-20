@@ -1,0 +1,30 @@
+subsection mesh
+  set mesh_dir = ../../../mesh/aneurysm.msh
+end
+
+subsection boundary conditions
+  set n_bcs = 6
+
+  # ---- (boundary_id, dir, value, type)
+  set bc0 = (4, 0, 0.0, uniform) 
+  set bc1 = (4, 1, 0.0, uniform)
+  set bc2 = (4, 2, 1.0, uniform)
+  set bc3 = (6, 0, 0.0, uniform)
+  set bc4 = (6, 1, 0.0, uniform)
+  set bc5 = (6, 2, 0.0, uniform)
+end
+
+subsection finite element
+  set degree_vel = 1
+  set degree_pre = 1
+end
+
+subsection fluid
+  set dt = 0.1
+  set t_end = 20
+  set mu = 1.0
+  set rho = 20.0
+end
+
+set output_interval = 10
+set verbose = false

@@ -29,6 +29,7 @@ public:
   using PDEBase<dim>::triangulation;
   using PDEBase<dim>::dof_handler;
   using PDEBase<dim>::make_grid;
+  using PDEBase<dim>::bcs;
 
   NavierStokesGLS(
     const RuntimeParams_NavierStokes &params);
@@ -49,7 +50,6 @@ private:
   const FEValuesExtractors::Vector vel_ext;
   const FEValuesExtractors::Scalar pre_ext;
 
-  AffineConstraints<double> hanging_node_constraints;
   const QGaussSimplex <dim> q_gauss;
 
   PETScWrappers::MPI::SparseMatrix system_matrix;
@@ -89,6 +89,9 @@ private:
   void assemble_rhs(
     Vector<double> &cell_rhs, FEValues<dim> &fe_values, 
     std::array<double, 2> &tau, const unsigned int q);
+
+  void apply_dirichlet_boundary_conditions(
+    std::map<types::global_dof_index, double>& boundary_values);
 };
 
 template <int dim>
@@ -136,8 +139,8 @@ void NavierStokesGLS<dim>::run()
   setup_system();
   initialize();
 
-  assemble_system(true);
-  solve_system();
+  // assemble_system(true);
+  // solve_system();
 
   unsigned int step_max 
   = static_cast<unsigned int>(t_end/dt) + 1;
@@ -153,10 +156,12 @@ void NavierStokesGLS<dim>::run()
     
     assemble_system(false);
     solve_system();
+
+    Vector<double> solution_global(solution);
     
     output_results(
       this->output_dir, triangulation, 
-      dof_handler, solution, mpi_comm, n);
+      dof_handler, solution_global, mpi_comm, n);
 
     t += dt;
   }
@@ -171,18 +176,14 @@ void NavierStokesGLS<dim>::setup_system()
 {
   dof_handler.distribute_dofs(fe);
 
-  locally_owned_dofs = dof_handler.locally_owned_dofs();
-  locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
-  
-  hanging_node_constraints.clear();
-  DoFTools::make_hanging_node_constraints(
-    dof_handler, hanging_node_constraints);
-  hanging_node_constraints.close();
+  locally_owned_dofs
+   = dof_handler.locally_owned_dofs();
+  locally_relevant_dofs 
+  = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
   DynamicSparsityPattern sparsity_pattern(locally_relevant_dofs);
   DoFTools::make_sparsity_pattern(
-    dof_handler, sparsity_pattern, 
-    hanging_node_constraints, false);
+    dof_handler, sparsity_pattern);
 
   SparsityTools::distribute_sparsity_pattern(
     sparsity_pattern, locally_owned_dofs,
@@ -418,24 +419,58 @@ double NavierStokesGLS<dim>::comp_cell_length(
   FEValues<dim> &fe_values, Tensor<1, dim> &u, 
   const unsigned int dofs_per_cell, const unsigned int q)
 {
-    double length_sum = 0.0;
+  double length_sum = 0.0;
 
-    const double u_mag = u.norm();
-    Tensor<1, dim> u_norm;
+  const double u_mag = u.norm();
+  Tensor<1, dim> u_norm;
 
-    if (u_mag > 1e-10)
-      u_norm = u/u_mag;
-    else
-      for (unsigned int d = 0; d < dim; ++d)
-        u_norm[d] = 1.0/std::sqrt(dim);
+  if (u_mag > 1e-10)
+    u_norm = u/u_mag;
+  else
+    for (unsigned int d = 0; d < dim; ++d)
+      u_norm[d] = 1.0/std::sqrt(dim);
 
-    for (unsigned int i = 0; i < dofs_per_cell; ++i)
+  for (unsigned int i = 0; i < dofs_per_cell; ++i)
+  {
+    Tensor<1, dim> grad_phi = fe_values[pre_ext].gradient(i, q);
+    length_sum += std::abs(u_norm*grad_phi);
+  }
+
+  return 2.0/length_sum;
+}
+
+template <int dim>
+void NavierStokesGLS<dim>::apply_dirichlet_boundary_conditions(
+  std::map<types::global_dof_index, double>& boundary_values)
+{
+  for (const auto &bc : bcs)
+  {
+    if (bc.dir == dim) 
     {
-      Tensor<1, dim> grad_phi = fe_values[pre_ext].gradient(i, q);
-      length_sum += std::abs(u_norm*grad_phi);
+      VectorTools::interpolate_boundary_values(
+        dof_handler,
+        types::boundary_id(bc.id),
+        VelocityUniform<dim>(bc.dir, bc.value),
+        boundary_values,
+        fe.component_mask(pre_ext)
+      );
     }
+    else
+    {
+      ComponentMask mask = fe.component_mask(vel_ext);
+      for (unsigned int d = 0; d < mask.size(); ++d)
+        mask.set(d, false);
+      mask.set(bc.dir, true);
 
-    return 2.0/length_sum;
+      VectorTools::interpolate_boundary_values(
+        dof_handler,
+        types::boundary_id(bc.id),
+        VelocityUniform<dim>(bc.dir, bc.value),
+        boundary_values,
+        mask
+      );
+    }
+  }
 }
 
 template <int dim>
@@ -454,11 +489,14 @@ void NavierStokesGLS<dim>::assemble_system(const bool initial)
   
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
+  Vector<double> solution_global(solution);
+  Vector<double> solution_global_prev(solution_prev);
+
   auto evaluate_values_on_q_points = [&]()
   {
-    fe_values[vel_ext].get_function_values(solution, u_q);
-    fe_values[vel_ext].get_function_values(solution_prev, u_q_prev);
-    fe_values[vel_ext].get_function_gradients(solution, u_q_grad);
+    fe_values[vel_ext].get_function_values(solution_global, u_q);
+    fe_values[vel_ext].get_function_values(solution_global_prev, u_q_prev);
+    fe_values[vel_ext].get_function_gradients(solution_global, u_q_grad);
   };
 
   system_matrix = 0;
@@ -497,8 +535,7 @@ void NavierStokesGLS<dim>::assemble_system(const bool initial)
         }
       }
       cell->get_dof_indices(local_dof_indices);
-
-
+        
       for (const unsigned int i : fe_values.dof_indices())
         for (const unsigned int j : fe_values.dof_indices())
           system_matrix.add(local_dof_indices[i], 
@@ -515,49 +552,38 @@ void NavierStokesGLS<dim>::assemble_system(const bool initial)
 
   std::map<types::global_dof_index, double> boundary_values;
 
-  VectorTools::interpolate_boundary_values(
-    dof_handler,
-    types::boundary_id(this->inlet_label),
-    InletVelocityUniform<dim>(0, 1e0),
-    boundary_values,
-    fe.component_mask(vel_ext)
-  );
+  apply_dirichlet_boundary_conditions(boundary_values);
 
   // VectorTools::interpolate_boundary_values(
   //   dof_handler,
-  //   types::boundary_id(this->outlet_label),
-  //   InletVelocityUniform<dim>(0, 0e0),
+  //   types::boundary_id(this->inlet_label),
+  //   VelocityUniform<dim>(0, 1e0),
   //   boundary_values,
-  //   fe.component_mask(pre_ext)
+  //   fe.component_mask(vel_ext)
   // );
 
-  VectorTools::interpolate_boundary_values(
-    dof_handler,
-    types::boundary_id(this->wall_label),
-    WallVelocity<dim>(0.0),
-    boundary_values,
-    fe.component_mask(vel_ext)
-  );
+  // VectorTools::interpolate_boundary_values(
+  //   dof_handler,
+  //   types::boundary_id(this->wall_label),
+  //   WallVelocity<dim>(0.0),
+  //   boundary_values,
+  //   fe.component_mask(vel_ext)
+  // );
 
   solution_prev = solution;
 
-  PETScWrappers::MPI::Vector tmp(locally_owned_dofs, mpi_comm);
   MatrixTools::apply_boundary_values(
-      boundary_values, system_matrix, tmp, system_rhs, false);
-  solution = tmp;
+      boundary_values, system_matrix, solution, system_rhs, false);
 }
 
 template <int dim>
 void NavierStokesGLS<dim>::solve_system()
-{  
+{    
   SolverControl solver_control(10000, 1e-6*system_rhs.l2_norm());
   PETScWrappers::SolverGMRES gmres(solver_control);
 
   PETScWrappers::PreconditionBlockJacobi preconditioner(system_matrix);
   gmres.solve(system_matrix, solution, system_rhs, preconditioner);
-
-  Vector<double> localized_solution(solution);
-  solution = localized_solution;
 
   // return solver_control.last_step();
 }

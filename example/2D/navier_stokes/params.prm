@@ -1,15 +1,9 @@
 subsection mesh
-  set mesh_dir = ../../../mesh/cavity.msh
+  set mesh_path = ../../../mesh/2D/bend_tube/bend_tube_extended_scaled.msh
 end
 
 subsection boundary conditions
-  set n_bcs = 4
-
-  # ---- (boundary_id, dir, value, type)
-  set bc0 = (6, 0, 1.0, uniform) 
-  set bc1 = (6, 1, 0.0, uniform)
-  set bc2 = (7, 0, 0.0, uniform)
-  set bc3 = (7, 1, 0.0, uniform)
+  set bc_data_path = inputs/bend_tube_extended/bc.h5
 end
 
 subsection finite element
@@ -18,12 +12,13 @@ subsection finite element
 end
 
 subsection fluid
-  set dt = 0.1
-  set t_end = 1
-  set mu = 1
-  set rho = 100.0
+  set dt = 0.001   # [s]
+  set t_end = 1.2  # [s]
+  set mu = 0.0035  # [Pa s]
+  set rho = 1050   # [kg/m^3]
 end
 
+set output_dir = bend_tube_extended
 set output_interval = 10
 set verbose = false
 

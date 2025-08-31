@@ -1,0 +1,24 @@
+subsection mesh
+  set mesh_path = ../../../mesh/3D/stenosis_v1/stenosis.msh
+end
+
+subsection boundary conditions
+  # ---- file path for boundary consitions info
+  set bc_data_path = ../bc_time_series/output/bc_time_series.h5
+end
+
+subsection finite element
+  set degree_vel = 1
+  set degree_pre = 1
+end
+
+subsection fluid
+  set dt = 0.00005
+  set t_end = 0.1
+  set mu = 0.01
+  set rho = 1000.0
+end
+
+set output_dir = test
+set output_interval = 10
+set verbose = false

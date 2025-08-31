@@ -40,6 +40,9 @@ public:
 private:
   const double mu;
 
+  std::string bc_data_path;
+  BCData<dim> bc_data;
+
   IndexSet locally_owned_dofs;
   IndexSet locally_relevant_dofs;
 
@@ -69,6 +72,7 @@ StokesPSPG<dim>::StokesPSPG(
     const RuntimeParams_Stokes &params)
     : PDEBase<dim>(params)
     , mu(params.mu)
+    , bc_data_path(params.bc_data_path)
     , vel_ext(0)
     , pre_ext(dim)
     , q_gauss(2)
@@ -86,6 +90,10 @@ void StokesPSPG<dim>::run()
   make_grid();
   setup_system();
 
+  process_bcs_from_h5(
+    bc_data, pcout, bc_data_path
+  );
+
   assemble_system();
   solve_system();
 
@@ -95,7 +103,7 @@ void StokesPSPG<dim>::run()
     this->output_dir, triangulation, 
     dof_handler, solution_global, mpi_comm, 0);
 
-  write_final_xdmf<dim>(this->output_dir, mpi_comm);
+  write_xdmf_all<dim>(this->output_dir, mpi_comm);
   
   pcout << "Completed." << std::endl;
 }
@@ -165,34 +173,82 @@ template <int dim>
 void StokesPSPG<dim>::apply_dirichlet_boundary_conditions(
   std::map<types::global_dof_index, double>& boundary_values)
 {
-  for (const auto &bc : bcs)
+  for (const auto &bc : bc_data.bcs)
   {
-    if (bc.dir == dim) 
+    if (bc.dir == dim) // pressure
     {
-      VectorTools::interpolate_boundary_values(
-        dof_handler,
-        types::boundary_id(bc.id),
-        VelocityUniform<dim>(bc.dir, bc.value),
-        boundary_values,
-        fe.component_mask(pre_ext)
-      );
-    }
-    else
-    {
-      ComponentMask mask = fe.component_mask(vel_ext);
-      for (unsigned int d = 0; d < mask.size(); ++d)
-        mask.set(d, false);
-      mask.set(bc.dir, true);
+      PressureUniformTimeSeries<dim> f(bc_data.time, bc.value);
+      f.set_time(0);
 
       VectorTools::interpolate_boundary_values(
         dof_handler,
         types::boundary_id(bc.id),
-        VelocityUniform<dim>(bc.dir, bc.value),
+        f,
         boundary_values,
-        mask
+        /*pressure mask*/ fe.component_mask(pre_ext)
+      );
+      continue;
+    }
+
+    ComponentMask one_comp(fe.n_components(), false);
+    one_comp.set(bc.dir, true);
+
+    if (bc.profile == ProfileType::Uniform)
+    {
+      VelocityUniformTimeSeries<dim> f(bc.dir, bc_data.time, bc.value);
+      f.set_time(0);
+
+      VectorTools::interpolate_boundary_values(
+        dof_handler,
+        types::boundary_id(bc.id),
+        f,
+        boundary_values,
+        one_comp
+      );
+    }
+    else if (bc.profile == ProfileType::Parabolic)
+    {
+      if (!bc.parabolic) continue;
+      VelocityParabolicTimeSeries<dim> f(bc.dir, bc_data.time, bc.value, *bc.parabolic);
+      f.set_time(0);
+
+      VectorTools::interpolate_boundary_values(
+        dof_handler,
+        types::boundary_id(bc.id),
+        f,
+        boundary_values,
+        one_comp
       );
     }
   }
+  // for (const auto &bc : bcs)
+  // {
+  //   if (bc.dir == dim) 
+  //   {
+  //     VectorTools::interpolate_boundary_values(
+  //       dof_handler,
+  //       types::boundary_id(bc.id),
+  //       VelocityUniform<dim>(bc.dir, bc.value),
+  //       boundary_values,
+  //       fe.component_mask(pre_ext)
+  //     );
+  //   }
+  //   else
+  //   {
+  //     ComponentMask mask = fe.component_mask(vel_ext);
+  //     for (unsigned int d = 0; d < mask.size(); ++d)
+  //       mask.set(d, false);
+  //     mask.set(bc.dir, true);
+
+  //     VectorTools::interpolate_boundary_values(
+  //       dof_handler,
+  //       types::boundary_id(bc.id),
+  //       VelocityUniform<dim>(bc.dir, bc.value),
+  //       boundary_values,
+  //       mask
+  //     );
+  //   }
+  // }
 }
 
 template <int dim>

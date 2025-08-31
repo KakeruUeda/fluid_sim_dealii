@@ -25,7 +25,7 @@ class RuntimeParams
   bool verbose;
   unsigned int output_interval;
 
-  std::string mesh_dir;
+  std::string mesh_path;
 
  protected:
   ParameterHandler prm;
@@ -35,7 +35,7 @@ void RuntimeParams::declare_params()
 {
   prm.enter_subsection("mesh");
   {
-    prm.declare_entry("mesh_dir", "../../mesh/aneurysm.msh",
+    prm.declare_entry("mesh_path", "",
                       Patterns::FileName(), "Path to mesh file");
   }
   prm.leave_subsection();
@@ -46,16 +46,6 @@ void RuntimeParams::declare_params()
                       "Degree of velocity FE");
     prm.declare_entry("degree_pre", "1", Patterns::Integer(1),
                       "Degree of pressure FE");
-  }
-  prm.leave_subsection();
-
-  prm.enter_subsection("boundary conditions");
-  {
-    prm.declare_entry("n_bcs", "0", Patterns::Integer());
-
-    for (unsigned int i = 0; i < 20; ++i) 
-      prm.declare_entry(
-        "bc" + std::to_string(i), "(0,0,0.0,uniform)", Patterns::Anything());
   }
   prm.leave_subsection();
 
@@ -78,7 +68,7 @@ void RuntimeParams::read_params(const std::string& filename)
 
   prm.enter_subsection("mesh");
   {
-    mesh_dir = prm.get("mesh_dir");
+    mesh_path = prm.get("mesh_path");
   }
   prm.leave_subsection();
 
@@ -86,32 +76,6 @@ void RuntimeParams::read_params(const std::string& filename)
   {
     degree_vel = prm.get_integer("degree_vel");
     degree_pre = prm.get_integer("degree_pre");
-  }
-  prm.leave_subsection();
-
-  prm.enter_subsection("boundary conditions");
-  {
-    const unsigned int n_bcs = prm.get_integer("n_bcs");
-  
-    for (unsigned int i = 0; i < n_bcs; ++i)
-    {
-      const std::string line = prm.get("bc" + std::to_string(i));
-    
-      std::string cleaned_line = line;
-      cleaned_line.erase(std::remove(cleaned_line.begin(), cleaned_line.end(), '('), cleaned_line.end());
-      cleaned_line.erase(std::remove(cleaned_line.begin(), cleaned_line.end(), ')'), cleaned_line.end());
-    
-      const auto tokens = Utilities::split_string_list(cleaned_line);
-    
-      AssertThrow(tokens.size() == 4, ExcMessage("Invalid BC format: " + line));
-    
-      bcs.push_back({
-        static_cast<unsigned int>(std::stoi(tokens[0])),
-        static_cast<unsigned int>(std::stoi(tokens[1])),
-        std::stod(tokens[2]),
-        tokens[3]
-      });
-    }
   }
   prm.leave_subsection();
 

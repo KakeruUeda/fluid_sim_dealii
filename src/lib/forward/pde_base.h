@@ -37,7 +37,9 @@
 #include <iostream>
 
 #include "boundary_conditions.h"
-#include "io.h"
+#include "input_mesh.h"
+#include "input_hdf5.h"
+#include "output_results.h"
 #include "runtime_params_base.h"
 
 using namespace dealii;
@@ -55,7 +57,9 @@ protected:
   const unsigned int this_mpi_proc;
 
   std::string output_dir;
-  const std::string mesh_dir;
+  const std::string mesh_path;
+
+  const unsigned int output_interval;
 
   const unsigned int inlet_label;
   const unsigned int outlet_label;
@@ -78,7 +82,8 @@ PDEBase<dim>::PDEBase(const RuntimeParams &params)
   , n_mpi_proc(Utilities::MPI::n_mpi_processes(mpi_comm))
   , this_mpi_proc(Utilities::MPI::this_mpi_process(mpi_comm))
   , output_dir(params.output_dir)
-  , mesh_dir(params.mesh_dir)
+  , mesh_path(params.mesh_path)
+  , output_interval(params.output_interval)
   , inlet_label(params.inlet_label)
   , outlet_label(params.outlet_label)
   , wall_label(params.wall_label)
@@ -105,7 +110,7 @@ void PDEBase<dim>::make_grid()
   GridIn<dim> gridin;
   gridin.attach_triangulation(triangulation);
 
-  std::ifstream f(mesh_dir);
+  std::ifstream f(mesh_path);
   gridin.read_msh(f);
 
   print_mesh_info(triangulation, pcout);

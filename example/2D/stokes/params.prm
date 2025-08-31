@@ -1,15 +1,14 @@
 subsection mesh
-  set mesh_dir = ../../../mesh/cavity.msh
+  set mesh_path = ../../../mesh/2D/cavity.msh
 end
 
 subsection boundary conditions
-  set n_bcs = 4
+  set bc_data_path = inputs/cavity/bc.h5
 
-  # ---- (boundary_id, dir, value, type)
-  set bc0 = (6, 0, 1.0, uniform) 
-  set bc1 = (6, 1, 0.0, uniform)
-  set bc2 = (7, 0, 0.0, uniform)
-  set bc3 = (7, 1, 0.0, uniform)
+  # bc0 = (6, 0, 1.0, uniform) 
+  # bc1 = (6, 1, 0.0, uniform)
+  # bc2 = (7, 0, 0.0, uniform)
+  # bc3 = (7, 1, 0.0, uniform)
 end
 
 subsection finite element

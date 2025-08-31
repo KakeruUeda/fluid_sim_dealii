@@ -44,6 +44,9 @@ private:
   const double rho;
   const double nu;
 
+  std::string bc_data_path;
+  BCData<dim> bc_data;
+
   IndexSet locally_owned_dofs;
   IndexSet locally_relevant_dofs;
 
@@ -64,7 +67,8 @@ private:
   std::vector<double> p_q;
 
   void setup_system();
-  void assemble_system(const bool initial);
+  double assemble_system(
+    const bool initial, const bool solve_stokes, const double t);
   void initialize();
   void solve_system();
   
@@ -72,15 +76,12 @@ private:
     FEValues<dim> &fe_values, Tensor<1, dim> &u, 
     const unsigned int dofs_per_cell, const unsigned int q);
 
-  std::array<double, 2> comp_stab_params_1(
-    const Tensor<1, dim> &u, const double h);
-
-  std::array<double, 2> comp_stab_params_2(
+  std::array<double, 2> comp_stab_params(
     const Tensor<1, dim> &u, const double h);
 
   void assemble_matrix_initial(
     FullMatrix<double> &cell_matrix, FEValues<dim> &fe_values, 
-    const double mu, std::array<double, 2> &tau, const unsigned int q);
+    const double tau, const unsigned int q);
 
   void assemble_matrix(
     FullMatrix<double> &cell_matrix, FEValues<dim> &fe_values, 
@@ -91,7 +92,7 @@ private:
     std::array<double, 2> &tau, const unsigned int q);
 
   void apply_dirichlet_boundary_conditions(
-    std::map<types::global_dof_index, double>& boundary_values);
+    std::map<types::global_dof_index, double>& boundary_values, const double t);
 };
 
 template <int dim>
@@ -103,6 +104,7 @@ NavierStokesGLS<dim>::NavierStokesGLS(
     , mu(params.mu)
     , rho(params.rho)
     , nu(params.mu/params.rho)
+    , bc_data_path(params.bc_data_path)
     , vel_ext(0)
     , pre_ext(dim)
     , q_gauss(2)
@@ -135,17 +137,54 @@ void NavierStokesGLS<dim>::initialize()
 template <int dim>
 void NavierStokesGLS<dim>::run()
 {
+  // --- log open (rank 0 only) ---
+  std::ofstream log;
+  if (this->this_mpi_proc == 0)
+  {
+    std::string log_path = this->output_dir + "/run.log";
+    log.open(log_path, std::ios::app); 
+    if (!log)
+    {
+      throw std::runtime_error(
+        "failed to open log file: " + log_path);
+    }
+
+    log << "--- physical information ---" << std::endl;
+    log << std::endl;
+    log << " dt    = " << dt    << std::endl;
+    log << " t_end = " << t_end << std::endl;
+    log << " mu    = " << mu    << std::endl;
+    log << " rho   = " << rho   << std::endl;
+    log << std::endl;
+  }
+
   make_grid();
   setup_system();
   initialize();
 
-  // assemble_system(true);
+  process_bcs_from_h5(
+    bc_data, pcout, bc_data_path
+  );
+
+  // // stokes eq.
+  // assemble_system(false, false, 0);
   // solve_system();
 
+  if (this->this_mpi_proc == 0)
+    log << "--- simulation begins ---" << std::endl;
+    
+  const double eps = 1e-12;
   unsigned int step_max 
-  = static_cast<unsigned int>(t_end/dt) + 1;
-  
+  = static_cast<unsigned int>(t_end/dt+eps) + 1;
+
+  if (bc_data.time.size() != step_max)
+  {
+    throw std::runtime_error(
+      "input step size must be equal to step_max");
+  }
+
   double t = 0e0;
+  bool initial = true;
   for (unsigned int n = 0; n < step_max; ++n)
   {
     pcout << std::left
@@ -153,19 +192,36 @@ void NavierStokesGLS<dim>::run()
       << " step/step_max = " << std::setw(4) 
       << n << " / " << std::setw(4) << step_max-1 
       << std::endl;
-    
-    assemble_system(false);
-    solve_system();
 
-    Vector<double> solution_global(solution);
+    if (this->this_mpi_proc == 0)
+    {
+      log << std::endl;
+      log << "Time : " << t << " [s], Step : " 
+      << n << "/" << (step_max-1) << std::endl;
+    }
+
+    double max_cfl = 0.0;
+    max_cfl = assemble_system(initial, false, t);
+
+    if (this->this_mpi_proc == 0)
+      log << "Maximum CFL number : " << max_cfl << std::endl;
+
+    solve_system();
     
-    output_results(
-      this->output_dir, triangulation, 
-      dof_handler, solution_global, mpi_comm, n);
+    Vector<double> solution_global(solution);
+
+    if (n % this->output_interval == 0)
+    { 
+      output_results_to_group_hdf5(
+        this->output_dir, triangulation, 
+        dof_handler, solution_global, mpi_comm, n
+      );
+    }
 
     t += dt;
+    initial = false;
   }
-  write_final_xdmf<dim>(this->output_dir, mpi_comm);
+  write_custom_xdmf_all<dim>(this->output_dir, mpi_comm);
   
   pcout << "Completed." << std::endl;
 }
@@ -199,7 +255,7 @@ void NavierStokesGLS<dim>::setup_system()
 }
 
 template <int dim>
-std::array<double, 2> NavierStokesGLS<dim>::comp_stab_params_1(
+std::array<double, 2> NavierStokesGLS<dim>::comp_stab_params(
   const Tensor<1, dim> &u, const double h)
 {
   double vel_mag = 0e0;
@@ -209,60 +265,20 @@ std::array<double, 2> NavierStokesGLS<dim>::comp_stab_params_1(
 
   std::array<double, 2> tau;
 
-  double Re = rho*vel_mag*h/mu;
-
   const double term1 = std::pow(2.0/dt, 2);
   const double term2 = std::pow(2.0*vel_mag/h, 2);
-  const double term3 = std::pow(4.0*Re/(h*h), 2);
+  const double term3 = std::pow(4.0*nu/(h*h), 2);
   
   tau[0] = 1e0/std::sqrt(term1 + term2 + term3);
-  tau[1] = h*h/mu/12e0;
-  // tau[1] = tau[0];
+  tau[1] = tau[0];
 
   return tau;
 }
-
-template <int dim>
-std::array<double, 2> NavierStokesGLS<dim>::comp_stab_params_2(
-  const Tensor<1, dim> &u, const double h)
-{
-  double vel_mag = 0.0;
-  for (unsigned int d = 0; d < dim; ++d)
-    vel_mag += u[d]*u[d];
-  vel_mag = std::sqrt(vel_mag);
-
-  double Re = rho*vel_mag*h/mu;
-
-  const double beta[6] 
-  = {1.0, 1.0/3.0, 30.0, 0.1, 1.0, 1.0};
-
-  std::array<double, 2> tau;
-
-  if (Re < 1.0e-10)
-  {
-    double fact = h*h/(4.0*mu/rho);
-    tau[0] = fact*beta[0];
-    tau[1] = fact*beta[2];
-  }
-  else
-  {
-    double fact2 = h/(2.0*vel_mag*rho);
-
-    double fact = beta[0]/(beta[1]*Re);
-    tau[0] = fact2*beta[0]/std::sqrt(1.0 + fact*fact);
-
-    fact = beta[2]/(beta[3]*Re);
-    tau[1] = fact2*beta[2]/std::sqrt(1.0 + fact*fact);
-  }
-
-  return tau;
-}
-
 
 template <int dim>
 void NavierStokesGLS<dim>::assemble_matrix_initial(
   FullMatrix<double> &cell_matrix, FEValues<dim> &fe_values, 
-  const double mu, std::array<double, 2> &tau, const unsigned int q)
+  const double tau, const unsigned int q)
 {
   const auto &phi_u = fe_values[vel_ext];
   const auto &phi_p = fe_values[pre_ext];
@@ -287,7 +303,7 @@ void NavierStokesGLS<dim>::assemble_matrix_initial(
       )*fe_values.JxW(q);
 
       // PSPG pressure term
-      cell_matrix(i, j) += tau[1]*(
+      cell_matrix(i, j) += tau*(
         phi_p.gradient(i, q)*phi_p.gradient(j, q)
       )*fe_values.JxW(q);
     }
@@ -348,17 +364,17 @@ void NavierStokesGLS<dim>::assemble_matrix(
       )*fe_values.JxW(q);
 
       // PSPG mass term
-      cell_matrix(i, j) += tau[1]*rho*(1e0/dt)*(
+      cell_matrix(i, j) += tau[1]*(1e0/dt)*(
         phi_p.gradient(i, q)*phi_u.value(j, q)
       )*fe_values.JxW(q);
 
       // PSPG advection term
-      cell_matrix(i, j) += 5e-1*tau[1]*rho*(
+      cell_matrix(i, j) += 5e-1*tau[1]*(
         phi_p.gradient(i, q)*(phi_u.gradient(j, q)*u_q_adv[q])
       )*fe_values.JxW(q);
 
       // PSPG pressure term
-      cell_matrix(i, j) += tau[1]*(
+      cell_matrix(i, j) += tau[1]/rho*(
         phi_p.gradient(i, q)*phi_p.gradient(j, q)
       )*fe_values.JxW(q);
     }
@@ -403,12 +419,12 @@ void NavierStokesGLS<dim>::assemble_rhs(
     )*fe_values.JxW(q);
 
     // PSPG mass term
-    cell_rhs(i) += tau[1]*(1e0/dt)*rho*(
+    cell_rhs(i) += tau[1]*(1e0/dt)*(
       phi_p.gradient(i, q)*u_q[q]
     )*fe_values.JxW(q);
 
     // PSPG advection term
-    cell_rhs(i) -= 5e-1*tau[1]*rho*(
+    cell_rhs(i) -= 5e-1*tau[1]*(
       phi_p.gradient(i, q)*(u_q_grad[q]*u_q_adv[q])
     )*fe_values.JxW(q);
   }
@@ -419,17 +435,16 @@ double NavierStokesGLS<dim>::comp_cell_length(
   FEValues<dim> &fe_values, Tensor<1, dim> &u, 
   const unsigned int dofs_per_cell, const unsigned int q)
 {
-  double length_sum = 0.0;
-
   const double u_mag = u.norm();
   Tensor<1, dim> u_norm;
-
+  
   if (u_mag > 1e-10)
     u_norm = u/u_mag;
   else
     for (unsigned int d = 0; d < dim; ++d)
       u_norm[d] = 1.0/std::sqrt(dim);
-
+  
+  double length_sum = 0.0;
   for (unsigned int i = 0; i < dofs_per_cell; ++i)
   {
     Tensor<1, dim> grad_phi = fe_values[pre_ext].gradient(i, q);
@@ -441,40 +456,111 @@ double NavierStokesGLS<dim>::comp_cell_length(
 
 template <int dim>
 void NavierStokesGLS<dim>::apply_dirichlet_boundary_conditions(
-  std::map<types::global_dof_index, double>& boundary_values)
+  std::map<types::global_dof_index, double>& boundary_values, const double t)
 {
-  for (const auto &bc : bcs)
+  for (const auto &bc : bc_data.bcs)
   {
-    if (bc.dir == dim) 
+    if (bc.dir == dim) // pressure
     {
-      VectorTools::interpolate_boundary_values(
-        dof_handler,
-        types::boundary_id(bc.id),
-        VelocityUniform<dim>(bc.dir, bc.value),
-        boundary_values,
-        fe.component_mask(pre_ext)
-      );
-    }
-    else
-    {
-      ComponentMask mask = fe.component_mask(vel_ext);
-      for (unsigned int d = 0; d < mask.size(); ++d)
-        mask.set(d, false);
-      mask.set(bc.dir, true);
+      PressureUniformTimeSeries<dim> f(bc_data.time, bc.value);
+      f.set_time(t);
 
       VectorTools::interpolate_boundary_values(
         dof_handler,
         types::boundary_id(bc.id),
-        VelocityUniform<dim>(bc.dir, bc.value),
+        f,
         boundary_values,
-        mask
+        /*pressure mask*/ fe.component_mask(pre_ext)
+      );
+      continue;
+    }
+
+    ComponentMask one_comp(fe.n_components(), false);
+    one_comp.set(bc.dir, true);
+
+    if (bc.profile == ProfileType::Uniform)
+    {
+      VelocityUniformTimeSeries<dim> 
+      f(bc.dir, bc_data.time, bc.value);
+      
+      f.set_time(t);
+
+      VectorTools::interpolate_boundary_values(
+        dof_handler,
+        types::boundary_id(bc.id),
+        f,
+        boundary_values,
+        one_comp
+      );
+    }
+    else if (bc.profile == ProfileType::Parabolic)
+    {
+      if (!bc.parabolic) continue;
+      VelocityParabolicTimeSeries<dim> 
+      f(bc.dir, bc_data.time, bc.value, *bc.parabolic);
+
+      f.set_time(t);
+
+      VectorTools::interpolate_boundary_values(
+        dof_handler,
+        types::boundary_id(bc.id),
+        f,
+        boundary_values,
+        one_comp
       );
     }
   }
+
+  // for (const auto &bc : bcs)
+  // {
+  //   if (bc.dir == dim) 
+  //   {
+  //     VectorTools::interpolate_boundary_values(
+  //       dof_handler,
+  //       types::boundary_id(bc.id),
+  //       VelocityUniform<dim>(bc.dir, bc.value),
+  //       boundary_values,
+  //       fe.component_mask(pre_ext)
+  //     );
+  //   }
+  //   else
+  //   {
+  //     ComponentMask mask = fe.component_mask(vel_ext);
+  //     for (unsigned int d = 0; d < mask.size(); ++d)
+  //       mask.set(d, false);
+  //     mask.set(bc.dir, true);
+
+  //     VectorTools::interpolate_boundary_values(
+  //       dof_handler,
+  //       types::boundary_id(bc.id),
+  //       VelocityWave<dim>(bc.dir, bc.value, bc.type, t, T, b),
+  //       boundary_values,
+  //       mask
+  //     );
+  //   }
+  // }
+
+  // ComponentMask pressure_mask = fe.component_mask(pre_ext);
+  // std::map<types::global_dof_index, double> temp_pressure_values;
+  
+  // VectorTools::interpolate_boundary_values(
+  //   dof_handler,
+  //   5,                          
+  //   Functions::ZeroFunction<dim>(fe.n_components()),      
+  //   temp_pressure_values,
+  //   pressure_mask
+  // ); 
+  
+  // if (!temp_pressure_values.empty())
+  // {
+  //   const auto pinned_dof = temp_pressure_values.begin()->first;
+  //   boundary_values[pinned_dof] = 0.0; 
+  // }
 }
 
 template <int dim>
-void NavierStokesGLS<dim>::assemble_system(const bool initial)
+double NavierStokesGLS<dim>::assemble_system(
+  const bool initial, const bool solve_stokes, const double t)
 {
   FEValues<dim> fe_values(
     fe, q_gauss,
@@ -486,7 +572,6 @@ void NavierStokesGLS<dim>::assemble_system(const bool initial)
   
   FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
   Vector<double> cell_rhs(dofs_per_cell);
-  
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
   Vector<double> solution_global(solution);
@@ -502,6 +587,8 @@ void NavierStokesGLS<dim>::assemble_system(const bool initial)
   system_matrix = 0;
   system_rhs = 0;
 
+  double local_max_cfl = 0.0;
+
   for (const auto& cell : dof_handler.active_cell_iterators())
   {
     if (cell->is_locally_owned())
@@ -511,36 +598,49 @@ void NavierStokesGLS<dim>::assemble_system(const bool initial)
 
       cell_matrix = 0;
       cell_rhs = 0;
-      
-      for (unsigned int q = 0; q < n_q_points; ++q)
-        u_q_adv[q] = 1.5*u_q[q] - 0.5*u_q_prev[q];
+
+      if (initial)
+      {
+        for (unsigned int q = 0; q < n_q_points; ++q)
+          u_q_adv[q] = u_q[q];
+      }
+      else
+      {
+        for (unsigned int q = 0; q < n_q_points; ++q)
+          u_q_adv[q] = 1.5*u_q[q] - 0.5*u_q_prev[q];
+      }
 
       for (unsigned int q = 0; q < n_q_points; ++q)
       {
-        auto h = comp_cell_length(
-          fe_values, u_q[q], dofs_per_cell, q);
+        const auto h = comp_cell_length(fe_values, u_q[q], dofs_per_cell, q);
+        // const auto h = cell->diameter();
 
-        std::array<double, 2> tau
-          = comp_stab_params_1(u_q[q], h);
-        
-        if (initial)
+        // --- update CFL ---
+        if (h > 0.0)
         {
-          assemble_matrix_initial(
-            cell_matrix, fe_values, mu, tau, q);
+          const double cfl = u_q[q].norm() * dt / h; // |u| * dt / h
+          if (cfl > local_max_cfl) local_max_cfl = cfl;
+        }
+        // -------------------
+
+        if (solve_stokes)
+        {
+          const double tau = h*h/mu/12.0;
+          assemble_matrix_initial(cell_matrix, fe_values, tau, q);
         }
         else
         {
+          std::array<double, 2> tau = comp_stab_params(u_q[q], h);
           assemble_matrix(cell_matrix, fe_values, tau, q);
           assemble_rhs(cell_rhs, fe_values, tau, q);
         }
       }
+
       cell->get_dof_indices(local_dof_indices);
-        
       for (const unsigned int i : fe_values.dof_indices())
         for (const unsigned int j : fe_values.dof_indices())
           system_matrix.add(local_dof_indices[i], 
-                            local_dof_indices[j], 
-                            cell_matrix(i, j));
+            local_dof_indices[j], cell_matrix(i, j));
 
       for (const unsigned int i : fe_values.dof_indices())
         system_rhs(local_dof_indices[i]) += cell_rhs(i);
@@ -551,35 +651,21 @@ void NavierStokesGLS<dim>::assemble_system(const bool initial)
   system_rhs.compress(VectorOperation::add);
 
   std::map<types::global_dof_index, double> boundary_values;
-
-  apply_dirichlet_boundary_conditions(boundary_values);
-
-  // VectorTools::interpolate_boundary_values(
-  //   dof_handler,
-  //   types::boundary_id(this->inlet_label),
-  //   VelocityUniform<dim>(0, 1e0),
-  //   boundary_values,
-  //   fe.component_mask(vel_ext)
-  // );
-
-  // VectorTools::interpolate_boundary_values(
-  //   dof_handler,
-  //   types::boundary_id(this->wall_label),
-  //   WallVelocity<dim>(0.0),
-  //   boundary_values,
-  //   fe.component_mask(vel_ext)
-  // );
+  apply_dirichlet_boundary_conditions(boundary_values, t);
 
   solution_prev = solution;
-
   MatrixTools::apply_boundary_values(
       boundary_values, system_matrix, solution, system_rhs, false);
+
+  const double max_cfl =
+      dealii::Utilities::MPI::max(local_max_cfl, mpi_comm);
+  return max_cfl;
 }
 
 template <int dim>
 void NavierStokesGLS<dim>::solve_system()
 {    
-  SolverControl solver_control(10000, 1e-6*system_rhs.l2_norm());
+  SolverControl solver_control(10000, 1e-4*system_rhs.l2_norm());
   PETScWrappers::SolverGMRES gmres(solver_control);
 
   PETScWrappers::PreconditionBlockJacobi preconditioner(system_matrix);

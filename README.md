@@ -18,12 +18,12 @@ A computational fluid dynamics (CFD) solver built with the deal.II finite elemen
 ## Example
 ### Flow through a tube (Re = 2000)
 
-**Velocity Field**
+・**Velocity Field**
 
-https://github.com/KakeruUeda/fluid_sim_dealii/raw/main/media/stenosis_re2000_velocity.mp4
+![Velocity Field](media/stenosis_re2000_velocity.gif)
 
-**Vorticity Field**
+・**Vorticity Field**
 
-https://github.com/KakeruUeda/fluid_sim_dealii/raw/main/media/stenosis_re2000_voritcity.mp4  
+![Vorticity Field](media/stenosis_re2000_voritcity.gif)  
 
 

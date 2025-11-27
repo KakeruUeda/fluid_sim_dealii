@@ -1,7 +1,9 @@
 bin
 build
 input
+inputs
 output
+outputs
 a.out
 *.vti
 *.vtu

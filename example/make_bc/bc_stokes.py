@@ -3,26 +3,20 @@ import os
 import h5py
 from collections import OrderedDict
 
-# ---- parabolic profile params
+# ---- parabolic profile params ----
 radius = 0.5                  
 center = [-1.0, 1.0, 1.0]
 
-# ---- output settings
+# ---- output settings ---
 output_dir = "output_stokes"
 os.makedirs(output_dir, exist_ok=True)
 output_file = os.path.join(output_dir, "bc.h5")
-  # bc0 = (6, 0, 1.0, uniform) 
-  # bc1 = (6, 1, 0.0, uniform)
-  # bc2 = (7, 0, 0.0, uniform)
-  # bc3 = (7, 1, 0.0, uniform)
-t_values = np.array([0.0])  
+
+t_values = np.array([0.0])
 value_bc0 = np.full_like(t_values, 1.0)
 value_bc1 = np.full_like(t_values, 0.0)
 value_bc2 = np.full_like(t_values, 0.0)
 value_bc3 = np.full_like(t_values, 0.0)
-# value_bc4 = np.full_like(t_values, 0.0)
-# value_bc5 = np.full_like(t_values, 0.0)
-# value_bc6 = np.full_like(t_values, 0.0)
 
 BCS = [
     dict(id=6, dir=0, profile="uniform", value=value_bc0),

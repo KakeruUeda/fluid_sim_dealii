@@ -2,11 +2,12 @@ import os
 import glob
 import numpy as np
 import vtk
+import re
 from vtk.util.numpy_support import vtk_to_numpy
 
 # io
-i_dir = "inputs/aneurysm_A/pinn"
-o_dir = "outputs/aneurysm_A/pinn"
+i_dir = "inputs/sampleC/cfd"
+o_dir = "outputs/sampleC/cfd"
 os.makedirs(o_dir, exist_ok=True)
 
 i_vtk_pattern = os.path.join(i_dir, "velocity_inlet_region_*.vtk") 
@@ -23,9 +24,14 @@ results = []
 n_steps = 0
 mag_sum = 0.0
 
+def get_timestep(fname):
+    base = os.path.splitext(os.path.basename(fname))[0]
+    m = re.search(r'(\d+)$', base)
+    return int(m.group(1)) if m else -1
+
 # vtk data series
-for fname in sorted(glob.glob(i_vtk_pattern)):
-    timestep = int(os.path.splitext(os.path.basename(fname))[0].split("_")[-1])
+for fname in sorted(glob.glob(i_vtk_pattern), key=get_timestep):  # ← key追加！
+    timestep = get_timestep(fname)
     
     # read vtk
     reader = vtk.vtkPolyDataReader()
@@ -74,3 +80,11 @@ for fname in sorted(glob.glob(i_vtk_pattern)):
 
 time_avg_vel = mag_sum / n_steps
 print(f"time-averaged velocity: {time_avg_vel}")
+
+o_file = os.path.join(o_dir, "velocity.dat")
+with open(o_file, "w") as f:
+    for timestep, vx, vy, vz, mag in results:
+        f.write(f"{timestep} {vx:.6e} {vy:.6e} {vz:.6e} {mag:.6e}\n")
+    f.write(f"# Characteristic velocity (time-averaged velocity (magnitude)): {time_avg_vel:.6e}\n")
+
+print(f"Saved results to {o_file}")

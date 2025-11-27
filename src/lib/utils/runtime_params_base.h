@@ -53,7 +53,7 @@ void RuntimeParams::declare_params()
                     "Verbose output");
   prm.declare_entry("output_dir", "tmp", Patterns::FileName(),
                     "Output dir");
-  prm.declare_entry("output_interval", "10", Patterns::Integer(10),
+  prm.declare_entry("output_interval", "10", Patterns::Integer(1),
                     "Output interval");
 }
 

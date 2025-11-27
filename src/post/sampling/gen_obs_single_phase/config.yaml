@@ -1,0 +1,10 @@
+base:
+  dim: 2
+
+io:
+  i_dir: "../../../../example/2D/navier_stokes/outputs/straighttube"
+  o_dir: "outputs/2D/straighttube"
+
+sampling:
+  t_sample: 3.8 # sampling time [s]
+  step: 380 # sampling step [-]

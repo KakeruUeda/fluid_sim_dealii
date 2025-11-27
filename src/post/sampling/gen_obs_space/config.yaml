@@ -1,0 +1,13 @@
+base:
+  dim: 2
+
+io:
+  i_name: stenosis_asymmetric_mid_Wo_dt_obs_4e-2
+  o_name: stenosis_asymmetric_mid_Wo_dt_obs_4e-2_t_3p8_low_Res
+
+grid:
+  nx: 50
+  ny: 5
+
+sample:
+  step: 20

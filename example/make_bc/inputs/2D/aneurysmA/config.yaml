@@ -1,0 +1,12 @@
+time:
+  dt_cfd: 0.0002
+  t_end: 4
+
+normal: [0.894, 0.447]
+
+boundary:
+  - {id: 4, name: inlet,  profile_space: uniform, profile_time: wave,    dir: 0, value: 1}
+  - {id: 4, name: inlet,  profile_space: uniform, profile_time: wave,    dir: 1, value: 1}
+  - {id: 6, name: wall,   profile_space: uniform, profile_time: uniform, dir: 0, value: 0}
+  - {id: 6, name: wall,   profile_space: uniform, profile_time: uniform, dir: 1, value: 0}
+

@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./remote.conf
 
-SESSION="job_fluid_analysis"
+SESSION="fluid_sim"
 
 # --- without tmux ---
 # ssh "$HOST" /bin/zsh -l -c "
@@ -19,7 +19,7 @@ echo "Remote job started in session: $SESSION"
 
 # --- COMMAND IN TMUX -------------------------------------
 # reattach to the session
-# -> ssh -t macpro /bin/zsh -l -c 'export ITERM_SHELL_INTEGRATION_INSTALLED=; export ITERM_SESSION_ID=; /opt/homebrew/bin/tmux attach -t "job_fluid_analysis"'
+# -> ssh -t macpro /bin/zsh -l -c 'export ITERM_SHELL_INTEGRATION_INSTALLED=; export ITERM_SESSION_ID=; /opt/homebrew/bin/tmux attach -t "fluid_sim"'
 # exit from the session
 # -> ctr-b + d
 # kill the session

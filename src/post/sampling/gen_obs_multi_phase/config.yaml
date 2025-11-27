@@ -1,0 +1,11 @@
+base:
+  dim: 2
+
+io:
+  i_dir: ../../../../example/2D/navier_stokes/outputs/bendtubeC
+  o_dir: outputs/2D/bendtubeC
+
+sampling:
+  start: 500
+  skip: 1
+  n_phase: 1

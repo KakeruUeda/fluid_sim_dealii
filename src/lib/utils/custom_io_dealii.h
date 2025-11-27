@@ -324,7 +324,9 @@ CustomXDMFEntry create_custom_xdmf_entry(
     const DataOut<dim>& data_out,
     const DataOutBase::DataOutFilter& data_filter,
     const std::string& h5_mesh_filename,
-    const std::string& h5_solution_filename, const unsigned int step,
+    const std::string& h5_solution_filename, 
+    const double time,
+    const unsigned int step,
     const MPI_Comm comm)
 {
   AssertThrow(
@@ -400,7 +402,7 @@ CustomXDMFEntry create_custom_xdmf_entry(
     //              ExcNotImplemented());
     //   }
     auto entry = CustomXDMFEntry(
-        h5_mesh_filename, h5_solution_filename, step,
+        h5_mesh_filename, h5_solution_filename, time,
         global_node_cell_count[0], global_node_cell_count[1], dim,
         patches[0].reference_cell);
 

@@ -1,0 +1,21 @@
+boundary:
+    - {id: 17, name: inlet,  profile_space: parabolic, profile_time: wave,    dir: 0, value: 1} 
+    - {id: 17, name: inlet,  profile_space: uniform,   profile_time: uniform, dir: 1, value: 0}
+    - {id: 19, name: wall,   profile_space: uniform,   profile_time: uniform, dir: 0, value: 0}
+    - {id: 19, name: wall,   profile_space: uniform,   profile_time: uniform, dir: 1, value: 0}
+    - {id: 20, name: wall,   profile_space: uniform,   profile_time: uniform, dir: 0, value: 0}
+    - {id: 20, name: wall,   profile_space: uniform,   profile_time: uniform, dir: 1, value: 0}
+
+parabolic:
+    radius: 0.0025
+    center: [0, 0.0075]
+
+waveform: 
+    a: 0.2
+    b: 0.4
+    T: 1.0
+
+time:
+  dt: 0.001
+  t_end: 4.0
+

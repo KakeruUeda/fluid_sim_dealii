@@ -237,6 +237,7 @@ void output_results_to_group_hdf5(std::string output_dir,
                             DoFHandler<dim> &dof_handler, 
                             Vector<double> &solution,
                             MPI_Comm &mpi_comm,
+                            const double time,
                             unsigned int step)
 {
   DataOut<dim> data_out;
@@ -271,7 +272,7 @@ void output_results_to_group_hdf5(std::string output_dir,
   write_group_hdf5_parallel<dim>(data_filter, h5_filename, group_name, mpi_comm);
 
   auto entry = create_custom_xdmf_entry(data_out, data_filter, 
-    "solution.h5", "solution.h5", step, mpi_comm);
+    "solution.h5", "solution.h5", time, step, mpi_comm);
 
   custom_xdmf_entries.push_back(entry);
   write_custom_xdmf_file(custom_xdmf_entries, output_dir + "/solution.xdmf", mpi_comm);

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.13.4)
 set(TARGET "my_project")
 project(${TARGET} C CXX)
 
-# ----- set spatial dimention -----
+# ----- set spatial dimension -----
 option(DIM_2D "Compile with 2D" OFF)
 option(DIM_3D "Compile with 3D" OFF)
 

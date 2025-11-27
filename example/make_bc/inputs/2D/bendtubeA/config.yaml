@@ -1,0 +1,16 @@
+time:
+  dt_cfd: 0.0002
+  t_end: 5
+
+normal: [0.981, 0.196]
+
+parabolic:
+    radius: 0.002
+    center: [-0.016, 0]
+
+boundary:
+  - {id: 4, name: inlet,  profile_space: parabolic, profile_time: uniform, dir: 0, value: 0.1}
+  - {id: 4, name: inlet,  profile_space: parabolic, profile_time: uniform, dir: 1, value: 0.1}
+  - {id: 6, name: wall,   profile_space: uniform, profile_time: uniform, dir: 0, value: 0}
+  - {id: 6, name: wall,   profile_space: uniform, profile_time: uniform, dir: 1, value: 0}
+

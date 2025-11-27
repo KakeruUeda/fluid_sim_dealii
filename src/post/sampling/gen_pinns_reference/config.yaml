@@ -1,0 +1,6 @@
+base:
+  dim: 2
+  
+io:
+  i_dir: inputs/2D/aneurysmD
+  o_dir: outputs/2D/aneurysmD

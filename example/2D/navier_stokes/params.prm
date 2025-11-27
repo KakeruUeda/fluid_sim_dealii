@@ -1,9 +1,10 @@
 subsection mesh
-  set mesh_path = ../../../mesh/2D/bend_tube/bend_tube_extended_scaled.msh
+  set mesh_path = ../../../mesh/2D/aneurysmD/aneurysmD.msh
 end
 
 subsection boundary conditions
-  set bc_data_path = inputs/bend_tube_extended/bc.h5
+  # --- file path for boundary consitions info ---
+  set bc_data_path = inputs/aneurysmD/bc.h5
 end
 
 subsection finite element
@@ -12,13 +13,12 @@ subsection finite element
 end
 
 subsection fluid
-  set dt = 0.001   # [s]
-  set t_end = 1.2  # [s]
+  set dt = 0.0002  # [s]
+  set t_end = 4    # [s]
   set mu = 0.0035  # [Pa s]
   set rho = 1050   # [kg/m^3]
 end
 
-set output_dir = bend_tube_extended
-set output_interval = 10
+set output_dir = aneurysmD
+set output_interval = 50
 set verbose = false
-

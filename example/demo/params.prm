@@ -16,7 +16,7 @@ subsection fluid
   set dt = 0.01    # [s]
   set t_end = 5    # [s]
   set mu = 1       # [Pa s]
-  set rho = 100    # [kg/m^3]
+  set rho = 1000    # [kg/m^3]
 end
 
 set output_dir = demo

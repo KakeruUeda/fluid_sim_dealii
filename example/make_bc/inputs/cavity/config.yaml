@@ -1,0 +1,15 @@
+time:
+  dt_cfd: 0.01
+  t_end: 5
+
+normal: [1, 0]
+
+boundary:
+  - {id: 9,  name: wall_top,     profile_space: uniform, profile_time: uniform, dir: 0, value: 1}
+  - {id: 9,  name: wall_top,     profile_space: uniform, profile_time: uniform, dir: 1, value: 0}
+  - {id: 10, name: wall_left,    profile_space: uniform, profile_time: uniform, dir: 0, value: 0}
+  - {id: 10, name: wall_left,    profile_space: uniform, profile_time: uniform, dir: 1, value: 0}
+  - {id: 11, name: inlet_right,  profile_space: uniform, profile_time: uniform, dir: 0, value: 0}
+  - {id: 11, name: inlet_right,  profile_space: uniform, profile_time: uniform, dir: 1, value: 0}
+  - {id: 12, name: inlet_bottom, profile_space: uniform, profile_time: uniform, dir: 0, value: 0}
+  - {id: 12, name: inlet_bottom, profile_space: uniform, profile_time: uniform, dir: 1, value: 0}

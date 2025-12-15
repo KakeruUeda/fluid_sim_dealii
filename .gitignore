@@ -4,6 +4,9 @@ input
 inputs
 output
 outputs
+remote
+mesh/2D
+mesh/3D
 a.out
 *.vti
 *.vtu

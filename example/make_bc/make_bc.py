@@ -7,17 +7,17 @@ import h5py
 import yaml
 from collections import OrderedDict
 
-i_name = "aneurysmA"
+i_name = "cavity"
 
 # --- input info ---
-i_dir = "inputs/2D/" + i_name
+i_dir = "inputs/" + i_name
 i_config = i_dir + "/config.yaml"
 with open(i_config, "r") as f:
     config = yaml.safe_load(f)
 # -------------------
 
 # --- output info ---
-o_dir = "outputs/2D/" + i_name
+o_dir = "outputs/" + i_name
 o_h5 = o_dir + "/bc.h5"
 os.makedirs(o_dir, exist_ok=True)
 # --------------------

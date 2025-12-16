@@ -10,9 +10,12 @@
  */
 
 #pragma once
+#include <petscmat.h>
+#include <petscviewer.h>
 #include <string>
 
 #include <deal.II/base/parameter_handler.h>
+#include <deal.II/lac/petsc_sparse_matrix.h>
 #include <sys/stat.h>
 
 #include "boundary_conditions.h"
@@ -105,6 +108,12 @@ private:
   void apply_dirichlet_boundary_conditions(
       std::map<types::global_dof_index, double>& boundary_values,
       const double                               t);
+
+  void dump_matrix_market(
+      const std::string& filename);
+
+  void dump_rhs_market(
+      const std::string& filename);
 };
 
 template <int dim>
@@ -192,7 +201,10 @@ void NavierStokesGLS<dim>::run()
     throw std::runtime_error(
         "input step size must be equal to step_max");
   }
-
+ 
+  std::string output_dir_system = this->output_dir + "/systems";
+  mkdir(output_dir_system.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+ 
   double t       = 0e0;
   bool   initial = true;
   for (unsigned int n = 0; n < step_max; ++n)
@@ -213,6 +225,22 @@ void NavierStokesGLS<dim>::run()
     double max_cfl = 0.0;
     max_cfl        = assemble_system(initial, false, t);
 
+    auto step_tag = [](unsigned int n) -> std::string {
+      std::ostringstream oss;
+      oss << std::setw(4) << std::setfill('0') << n;
+      return oss.str();
+    };
+    const std::string tag = step_tag(n);
+        
+    const std::string matrix_name = output_dir_system + "/A_NS_"   + tag + ".mtx";
+    const std::string rhs_name    = output_dir_system + "/b_NS_" + tag + ".mtx";
+    
+    system_matrix.compress(VectorOperation::insert);
+    system_rhs.compress(VectorOperation::insert);
+    
+    dump_matrix_market(matrix_name);
+    dump_rhs_market(rhs_name);
+    
     if (this->this_mpi_proc == 0)
       log << "Maximum CFL number : " << max_cfl << std::endl;
 
@@ -578,7 +606,7 @@ double NavierStokesGLS<dim>::assemble_system(
         const auto h = comp_cell_length(fe_values, u_q[q], dofs_per_cell, q);
         // const auto h = cell->diameter();
 
-        // --- update CFL ---
+        // --- update CFL ----
         if (h > 0.0)
         {
           const double cfl = u_q[q].norm() * dt / h; // |u| * dt / h
@@ -638,3 +666,31 @@ void NavierStokesGLS<dim>::solve_system()
   preconditioner.initialize(system_matrix);
   gmres.solve(system_matrix, solution, system_rhs, preconditioner);
 }
+
+template <int dim>
+void NavierStokesGLS<dim>::dump_matrix_market(
+    const std::string& filename)
+{
+  PetscViewer viewer;
+  PetscViewerASCIIOpen(mpi_comm, filename.c_str(), &viewer);
+  PetscViewerPushFormat(viewer, PETSC_VIEWER_ASCII_MATRIXMARKET);
+
+  MatView(system_matrix.petsc_matrix(), viewer);
+
+  PetscViewerPopFormat(viewer);
+  PetscViewerDestroy(&viewer);
+}
+
+template <int dim>
+void NavierStokesGLS<dim>::dump_rhs_market(const std::string &filename)
+{
+  PetscViewer viewer;
+  PetscViewerASCIIOpen(mpi_comm, filename.c_str(), &viewer);
+  PetscViewerPushFormat(viewer, PETSC_VIEWER_ASCII_MATRIXMARKET);
+
+  VecView(system_rhs.petsc_vector(), viewer);
+
+  PetscViewerPopFormat(viewer);
+  PetscViewerDestroy(&viewer);
+}
+

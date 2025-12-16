@@ -1,6 +1,6 @@
 time:
   dt_cfd: 0.01
-  t_end: 5
+  t_end: 30
 
 normal: [1, 0]
 
